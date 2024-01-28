@@ -62,5 +62,9 @@ public class GroceryItemService {
         return groceryItemRepository.save(existingItem);
     }
 
+    public List<GroceryItem> getAllAvailableGroceryItems() {
+        return groceryItemRepository.findByQuantityGreaterThan(0);
+    }
+
     // Other methods for updating, deleting, managing inventory, etc.
 }

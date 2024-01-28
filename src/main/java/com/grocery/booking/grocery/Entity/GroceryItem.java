@@ -3,6 +3,7 @@ package com.grocery.booking.grocery.Entity;
 import jakarta.persistence.*;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 
@@ -14,8 +15,15 @@ public class GroceryItem {
     private Long id;
 
     private String name;
-    private double price;
+    private BigDecimal price;
     private int quantity;
+
+    public void decreaseInventory(int quantityToDecrease) {
+        if (this.quantity < quantityToDecrease) {
+            throw new IllegalArgumentException("Not enough stock available for item: " + this.name);
+        }
+        this.quantity -= quantityToDecrease;
+    }
 
     // getters and setters
 }

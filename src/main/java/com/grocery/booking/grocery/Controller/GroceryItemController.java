@@ -16,7 +16,7 @@ public class GroceryItemController {
     @Autowired
     private GroceryItemService groceryItemService;
 
-    @GetMapping
+    @GetMapping("/get")
     public List<GroceryItem> getAllGroceryItems() {
         return groceryItemService.getAllGroceryItems();
     }

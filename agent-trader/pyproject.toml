@@ -1,0 +1,53 @@
+[project]
+name = "agent-trader"
+version = "0.1.0"
+description = "Paper-trading platform for AI agents on the Indian stock market (NSE/BSE). Machine-first: MCP, REST, Python SDK, streaming. No human UI."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "mcp>=2.0",
+    "httpx>=0.27",
+    "sse-starlette>=2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "anyio>=4",
+    "ruff>=0.5",
+]
+llm = [
+    "anthropic>=0.40",
+]
+realdata = [
+    "yfinance>=0.2",
+]
+
+[project.scripts]
+agent-trader = "agent_trader.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent_trader"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]

@@ -39,7 +39,11 @@ def register(req: schemas.RegisterAgentRequest, engine: Engine, rt: RT, x_admin_
     if not rt.settings.open_registration:
         require_admin(rt, x_admin_key)
     agent, key = engine.register_agent(
-        req.name, initial_cash=req.initial_cash, description=req.description, metadata=req.metadata, risk=_risk_dict(req.risk_limits)
+        req.name,
+        initial_cash=req.initial_cash,
+        description=req.description,
+        metadata=req.metadata,
+        risk=_risk_dict(req.risk_limits),
     )
     return {"agent": agent, "api_key": key}
 
@@ -103,7 +107,10 @@ def tighten_risk(req: schemas.RiskLimits, agent: Agent, engine: Engine):
     cur = agent["risk_limits"]
     for k, v in new.items():
         if Decimal(str(v)) > Decimal(str(cur[k])):
-            raise InvalidRequest(f"{k} can only be lowered by the agent (current {cur[k]})", hint="Ask an admin to raise limits.")
+            raise InvalidRequest(
+                f"{k} can only be lowered by the agent (current {cur[k]})",
+                hint="Ask an admin to raise limits.",
+            )
     return engine.update_risk_limits(agent["agent_id"], new)
 
 
@@ -121,7 +128,12 @@ def place(req: schemas.PlaceOrderRequest, agent: Agent, engine: Engine):
 
 
 @orders.get("")
-def list_orders(agent: Agent, engine: Engine, status: str | None = Query(None, description="open | OPEN | FILLED | CANCELLED | REJECTED | EXPIRED"), limit: int = Query(100, ge=1, le=500)):
+def list_orders(
+    agent: Agent,
+    engine: Engine,
+    status: str | None = Query(None, description="open | OPEN | FILLED | CANCELLED | REJECTED | EXPIRED"),
+    limit: int = Query(100, ge=1, le=500),
+):
     return engine.list_orders(agent["agent_id"], status=status, limit=limit)
 
 
@@ -154,12 +166,21 @@ def status(engine: Engine):
 
 
 @market.get("/instruments")
-def instruments(engine: Engine, q: str | None = None, exchange: schemas.ExchangeStr | None = None, limit: int = Query(200, ge=1, le=1000)):
+def instruments(
+    engine: Engine,
+    q: str | None = None,
+    exchange: schemas.ExchangeStr | None = None,
+    limit: int = Query(200, ge=1, le=1000),
+):
     return engine.instruments(q, Exchange(exchange) if exchange else None, limit)
 
 
 @market.get("/quotes")
-def quotes(engine: Engine, symbols: str | None = Query(None, description="comma separated; omit for all"), exchange: schemas.ExchangeStr = "NSE"):
+def quotes(
+    engine: Engine,
+    symbols: str | None = Query(None, description="comma separated; omit for all"),
+    exchange: schemas.ExchangeStr = "NSE",
+):
     syms = [s for s in symbols.split(",") if s.strip()] if symbols else None
     return engine.quotes(syms, Exchange(exchange))
 
@@ -170,7 +191,13 @@ def quote(symbol: str, engine: Engine, exchange: schemas.ExchangeStr = "NSE"):
 
 
 @market.get("/ohlc/{symbol}")
-def ohlc(symbol: str, engine: Engine, exchange: schemas.ExchangeStr = "NSE", interval: str = "1m", limit: int = Query(100, ge=1, le=1000)):
+def ohlc(
+    symbol: str,
+    engine: Engine,
+    exchange: schemas.ExchangeStr = "NSE",
+    interval: str = "1m",
+    limit: int = Query(100, ge=1, le=1000),
+):
     return engine.ohlc(symbol, Exchange(exchange), interval, limit)
 
 
@@ -178,7 +205,13 @@ def ohlc(symbol: str, engine: Engine, exchange: schemas.ExchangeStr = "NSE", int
 
 
 @events.get("/events")
-def poll_events(agent: Agent, engine: Engine, cursor: int = Query(0, ge=0), wait: float = Query(0, ge=0, le=60), limit: int = Query(200, ge=1, le=1000)):
+def poll_events(
+    agent: Agent,
+    engine: Engine,
+    cursor: int = Query(0, ge=0),
+    wait: float = Query(0, ge=0, le=60),
+    limit: int = Query(200, ge=1, le=1000),
+):
     """Long-poll for this agent's events after ``cursor``. Pass ``wait`` seconds to block until something arrives."""
     return engine.events_since(agent["agent_id"], cursor, wait_seconds=wait, limit=limit)
 
@@ -190,7 +223,9 @@ async def stream_events(agent: Agent, engine: Engine, cursor: int = Query(0, ge=
     async def gen():
         cur = cursor
         while True:
-            res = await asyncio.to_thread(engine.events_since, agent["agent_id"], cur, wait_seconds=15, limit=200)
+            res = await asyncio.to_thread(
+                engine.events_since, agent["agent_id"], cur, wait_seconds=15, limit=200
+            )
             for ev in res["events"]:
                 cur = ev["id"]
                 yield {"id": str(ev["id"]), "event": ev["type"], "data": json.dumps(ev)}
@@ -201,7 +236,13 @@ async def stream_events(agent: Agent, engine: Engine, cursor: int = Query(0, ge=
 
 
 @events.get("/stream/quotes")
-async def stream_quotes(agent: Agent, engine: Engine, symbols: str = Query(..., description="comma separated"), exchange: schemas.ExchangeStr = "NSE", interval: float = Query(1.0, ge=0.2, le=60)):
+async def stream_quotes(
+    agent: Agent,
+    engine: Engine,
+    symbols: str = Query(..., description="comma separated"),
+    exchange: schemas.ExchangeStr = "NSE",
+    interval: float = Query(1.0, ge=0.2, le=60),
+):
     """Server-sent events: a ``quotes`` event every ``interval`` seconds for the given symbols."""
     syms = [s.strip() for s in symbols.split(",") if s.strip()]
 
@@ -294,13 +335,27 @@ def capabilities(rt: RT):
         "auth": {"header": "X-API-Key", "obtain": "POST /v1/agents/register"},
         "openapi": "/openapi.json",
         "mcp": {"transport": "streamable-http", "path": "/mcp", "stdio": "agent-trader mcp"},
-        "market": {"exchanges": ["NSE", "BSE"], "currency": "INR", "session_ist": "09:15-15:30", "mis_square_off_ist": "15:20"},
-        "products": {"CNC": "delivery, no shorting", "MIS": f"intraday, {s.mis_leverage}x leverage, shorting allowed"},
+        "market": {
+            "exchanges": ["NSE", "BSE"],
+            "currency": "INR",
+            "session_ist": "09:15-15:30",
+            "mis_square_off_ist": "15:20",
+        },
+        "products": {
+            "CNC": "delivery, no shorting",
+            "MIS": f"intraday, {s.mis_leverage}x leverage, shorting allowed",
+        },
         "order_types": ["MARKET", "LIMIT", "SL", "SL-M"],
-        "defaults": {"initial_cash": float(s.default_initial_cash), "risk_limits": {
-            "max_order_value": float(s.risk_max_order_value), "max_position_value_per_symbol": float(s.risk_max_position_value_per_symbol),
-            "max_daily_loss": float(s.risk_max_daily_loss), "max_orders_per_minute": s.risk_max_orders_per_minute, "max_open_orders": s.risk_max_open_orders,
-        }},
+        "defaults": {
+            "initial_cash": float(s.default_initial_cash),
+            "risk_limits": {
+                "max_order_value": float(s.risk_max_order_value),
+                "max_position_value_per_symbol": float(s.risk_max_position_value_per_symbol),
+                "max_daily_loss": float(s.risk_max_daily_loss),
+                "max_orders_per_minute": s.risk_max_orders_per_minute,
+                "max_open_orders": s.risk_max_open_orders,
+            },
+        },
         "clock_mode": s.clock_mode,
         "market_data_provider": s.market_data_provider,
         "endpoints": {

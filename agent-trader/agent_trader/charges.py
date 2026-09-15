@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
-from enum import Enum
+from enum import StrEnum
 
 PAISE = Decimal("0.01")
 
@@ -33,17 +33,17 @@ def to_paise(x: Decimal) -> Decimal:
     return x.quantize(PAISE, rounding=ROUND_HALF_UP)
 
 
-class Exchange(str, Enum):
+class Exchange(StrEnum):
     NSE = "NSE"
     BSE = "BSE"
 
 
-class ProductType(str, Enum):
+class ProductType(StrEnum):
     CNC = "CNC"  # Cash & Carry – delivery, held overnight, no short selling
     MIS = "MIS"  # Margin Intraday Square-off – auto squared-off at 15:20 IST, shorting allowed
 
 
-class Side(str, Enum):
+class Side(StrEnum):
     BUY = "BUY"
     SELL = "SELL"
 
@@ -86,7 +86,13 @@ class ChargeBreakdown:
     @property
     def total(self) -> Decimal:
         return to_paise(
-            self.brokerage + self.stt + self.exchange_txn + self.sebi + self.stamp_duty + self.gst + self.dp_charge
+            self.brokerage
+            + self.stt
+            + self.exchange_txn
+            + self.sebi
+            + self.stamp_duty
+            + self.gst
+            + self.dp_charge
         )
 
     def as_dict(self) -> dict[str, str]:
@@ -146,8 +152,10 @@ def compute_charges(
 
     gst = to_paise((brokerage + exchange_txn + sebi) * s.gst_pct)
 
-    dp = to_paise(s.dp_charge_per_scrip_day) if (apply_dp_charge and not intraday and side == Side.SELL) else Decimal(
-        "0.00"
+    dp = (
+        to_paise(s.dp_charge_per_scrip_day)
+        if (apply_dp_charge and not intraday and side == Side.SELL)
+        else Decimal("0.00")
     )
 
     return ChargeBreakdown(

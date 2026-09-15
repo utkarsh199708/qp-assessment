@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import functools
 import os
-from typing import Any
 
 from mcp.server.mcpserver import Context, MCPServer
 
@@ -66,7 +65,9 @@ def build_mcp_server(rt: Runtime | None = None, *, stdio_single_agent: bool = Fa
                 auth = headers.get("authorization") or ""
                 if not key and auth.lower().startswith("bearer "):
                     key = auth[7:].strip()
-        key = key or os.environ.get("TRADER_API_KEY") or (remembered.get("key") if stdio_single_agent else None)
+        key = (
+            key or os.environ.get("TRADER_API_KEY") or (remembered.get("key") if stdio_single_agent else None)
+        )
         return engine.authenticate(key)["agent_id"]
 
     # ---- market data ----------------------------------------------------------------
@@ -110,7 +111,12 @@ def build_mcp_server(rt: Runtime | None = None, *, stdio_single_agent: bool = Fa
         agent, key = engine.register_agent(name, initial_cash=initial_cash, description=description)
         if stdio_single_agent:
             remembered["key"] = key
-        return {"agent": agent, "api_key": key, "note": "Store this key; it is not shown again." + (" It is remembered for the rest of this session." if stdio_single_agent else "")}
+        return {
+            "agent": agent,
+            "api_key": key,
+            "note": "Store this key; it is not shown again."
+            + (" It is remembered for the rest of this session." if stdio_single_agent else ""),
+        }
 
     @server.tool()
     @_guard
@@ -165,15 +171,35 @@ def build_mcp_server(rt: Runtime | None = None, *, stdio_single_agent: bool = Fa
         so retries are idempotent. Returns the order with status OPEN / FILLED / PARTIALLY_FILLED / CANCELLED / REJECTED, average_price and charges.
         """
         return engine.place_order(
-            _agent_id(ctx), symbol=symbol, side=side, quantity=quantity, exchange=exchange, order_type=order_type, product=product,
-            validity=validity, price=price, trigger_price=trigger_price, client_order_id=client_order_id, reasoning=reasoning, tag=tag, dry_run=dry_run,
+            _agent_id(ctx),
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            exchange=exchange,
+            order_type=order_type,
+            product=product,
+            validity=validity,
+            price=price,
+            trigger_price=trigger_price,
+            client_order_id=client_order_id,
+            reasoning=reasoning,
+            tag=tag,
+            dry_run=dry_run,
         )
 
     @server.tool()
     @_guard
-    def modify_order(ctx: Context, order_id: str, quantity: int | None = None, price: float | None = None, trigger_price: float | None = None) -> dict:
+    def modify_order(
+        ctx: Context,
+        order_id: str,
+        quantity: int | None = None,
+        price: float | None = None,
+        trigger_price: float | None = None,
+    ) -> dict:
         """Change quantity / price / trigger_price of a resting (OPEN) order."""
-        return engine.modify_order(_agent_id(ctx), order_id, quantity=quantity, price=price, trigger_price=trigger_price)
+        return engine.modify_order(
+            _agent_id(ctx), order_id, quantity=quantity, price=price, trigger_price=trigger_price
+        )
 
     @server.tool()
     @_guard
@@ -234,7 +260,11 @@ def build_mcp_server(rt: Runtime | None = None, *, stdio_single_agent: bool = Fa
         if agent["status"] == "ACTIVE":
             return agent
         if not (agent.get("halt_reason") or "").startswith("self:"):
-            return {"error": "CONFLICT", "message": "only self-imposed halts can be lifted by the agent", "hint": "Wait for the next trading day or ask an admin."}
+            return {
+                "error": "CONFLICT",
+                "message": "only self-imposed halts can be lifted by the agent",
+                "hint": "Wait for the next trading day or ask an admin.",
+            }
         return engine.resume_agent(aid)
 
     # ---- resources & prompts -----------------------------------------------------------

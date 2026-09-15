@@ -13,8 +13,8 @@ All times are Asia/Kolkata (UTC+05:30, no DST). The clock can run in three modes
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
-from enum import Enum
+from datetime import UTC, date, datetime, time, timedelta
+from enum import StrEnum
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -23,7 +23,7 @@ IST = ZoneInfo("Asia/Kolkata")
 ClockMode = Literal["real", "frozen", "always_open"]
 
 
-class MarketPhase(str, Enum):
+class MarketPhase(StrEnum):
     """Trading session phases of the NSE/BSE cash segment."""
 
     CLOSED = "CLOSED"
@@ -112,7 +112,7 @@ class MarketClock:
         if self.mode == "frozen":
             assert self.frozen_at is not None
             return self.frozen_at
-        return datetime.now(tz=timezone.utc).astimezone(IST)
+        return datetime.now(tz=UTC).astimezone(IST)
 
     def today(self) -> date:
         return self.now().date()

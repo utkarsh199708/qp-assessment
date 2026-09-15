@@ -10,7 +10,9 @@ FOUR_DP = Decimal("0.0001")
 PAISE = Decimal("0.01")
 
 
-def apply_fill(quantity: int, average_price: Decimal, side: Side, fill_qty: int, price: Decimal) -> tuple[int, Decimal, Decimal]:
+def apply_fill(
+    quantity: int, average_price: Decimal, side: Side, fill_qty: int, price: Decimal
+) -> tuple[int, Decimal, Decimal]:
     """Return ``(new_quantity, new_average_price, realised_pnl)`` after a fill.
 
     ``quantity`` is signed (negative = short). Adding in the same direction re-weights the

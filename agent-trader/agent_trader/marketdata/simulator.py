@@ -16,10 +16,10 @@ from __future__ import annotations
 import math
 import random
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Iterable
 
 from ..charges import Exchange
 from ..clock import IST, MarketClock, MarketPhase
@@ -85,8 +85,14 @@ class SimulatedMarketData:
     def _init_state(self, seed: InstrumentSeed, ex: Exchange, warmup: int) -> _State:
         rng = random.Random(f"{self.seed}:{seed.symbol}:{ex.value}")
         # BSE quotes carry a tiny basis versus NSE so the two listings are distinguishable.
-        base = seed.ref_price if ex == Exchange.NSE else round_to_tick(seed.ref_price * Decimal("1.0004"), seed.tick_size)
-        st = _State(seed=seed, exchange=ex, rng=rng, ltp=base, open=base, high=base, low=base, prev_close=base)
+        base = (
+            seed.ref_price
+            if ex == Exchange.NSE
+            else round_to_tick(seed.ref_price * Decimal("1.0004"), seed.tick_size)
+        )
+        st = _State(
+            seed=seed, exchange=ex, rng=rng, ltp=base, open=base, high=base, low=base, prev_close=base
+        )
         now = self.clock.now()
         st.day = now.date()
         if warmup > 0:
@@ -106,7 +112,9 @@ class SimulatedMarketData:
             hi = lo = o
             for _ in range(4):  # four sub-steps per minute for a plausible high/low
                 z = st.rng.gauss(0, 1)
-                price = price * Decimal(str(math.exp(-0.5 * sigma * sigma * dt / 4 + sigma * math.sqrt(dt / 4) * z)))
+                price = price * Decimal(
+                    str(math.exp(-0.5 * sigma * sigma * dt / 4 + sigma * math.sqrt(dt / 4) * z))
+                )
                 price = max(st.lower, min(st.upper, round_to_tick(price, st.seed.tick_size)))
                 hi, lo = max(hi, price), min(lo, price)
             vol = int(st.rng.lognormvariate(8, 0.6))
@@ -149,7 +157,7 @@ class SimulatedMarketData:
         candles = list(st.candles) + ([st.cur] if st.cur else [])
         mins = INTERVAL_MINUTES[interval]
         if mins == 1:
-            return candles[-limit:]
+            return [c.model_copy() for c in candles[-limit:]]
         buckets: dict[datetime, Candle] = {}
         for c in candles:
             if mins is None:
@@ -160,7 +168,9 @@ class SimulatedMarketData:
                     key = key.replace(minute=0)
             b = buckets.get(key)
             if b is None:
-                buckets[key] = Candle(ts=key, open=c.open, high=c.high, low=c.low, close=c.close, volume=c.volume)
+                buckets[key] = Candle(
+                    ts=key, open=c.open, high=c.high, low=c.low, close=c.close, volume=c.volume
+                )
             else:
                 b.high = max(b.high, c.high)
                 b.low = min(b.low, c.low)
@@ -251,16 +261,30 @@ class SimulatedMarketData:
     def _info(st: _State) -> InstrumentInfo:
         s = st.seed
         return InstrumentInfo(
-            symbol=s.symbol, exchange=st.exchange, name=s.name, sector=s.sector,
-            tick_size=s.tick_size, lot_size=s.lot_size, band_pct=s.band_pct, isin=s.isin,
+            symbol=s.symbol,
+            exchange=st.exchange,
+            name=s.name,
+            sector=s.sector,
+            tick_size=s.tick_size,
+            lot_size=s.lot_size,
+            band_pct=s.band_pct,
+            isin=s.isin,
         )
 
     def _quote(self, st: _State) -> Quote:
         tick = st.seed.tick_size
         return Quote(
-            symbol=st.seed.symbol, exchange=st.exchange, ltp=st.ltp,
-            bid=max(st.lower, st.ltp - tick), ask=min(st.upper, st.ltp + tick),
-            open=st.open, high=st.high, low=st.low, prev_close=st.prev_close,
-            upper_circuit=st.upper, lower_circuit=st.lower, volume=st.volume,
+            symbol=st.seed.symbol,
+            exchange=st.exchange,
+            ltp=st.ltp,
+            bid=max(st.lower, st.ltp - tick),
+            ask=min(st.upper, st.ltp + tick),
+            open=st.open,
+            high=st.high,
+            low=st.low,
+            prev_close=st.prev_close,
+            upper_circuit=st.upper,
+            lower_circuit=st.lower,
+            volume=st.volume,
             ts=st.last_ts or self.clock.now(),
         )

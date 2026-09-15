@@ -30,8 +30,13 @@ FROZEN_AT = datetime(2026, 9, 16, 10, 0, tzinfo=IST)  # a normal trading Wednesd
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
-        database_url="sqlite:///:memory:", clock_mode="frozen", frozen_at=FROZEN_AT, admin_api_key="admin-secret",
-        sim_seed=7, sim_warmup_candles=30, _env_file=None,
+        database_url="sqlite:///:memory:",
+        clock_mode="frozen",
+        frozen_at=FROZEN_AT,
+        admin_api_key="admin-secret",
+        sim_seed=7,
+        sim_warmup_candles=30,
+        _env_file=None,
     )
 
 

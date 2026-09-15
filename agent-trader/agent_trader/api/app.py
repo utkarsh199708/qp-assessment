@@ -43,7 +43,9 @@ def create_app(runtime: Runtime | None = None, *, start_loop: bool = True, mount
 
     app = FastAPI(title="agent-trader", version=__version__, description=DESCRIPTION, lifespan=lifespan)
     app.state.runtime = rt
-    app.add_middleware(CORSMiddleware, allow_origins=rt.settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(
+        CORSMiddleware, allow_origins=rt.settings.cors_origins, allow_methods=["*"], allow_headers=["*"]
+    )
 
     @app.exception_handler(TradingError)
     async def _trading_error(_: Request, exc: TradingError):
@@ -54,7 +56,11 @@ def create_app(runtime: Runtime | None = None, *, start_loop: bool = True, mount
         errs = [f"{'.'.join(str(p) for p in e['loc'] if p != 'body')}: {e['msg']}" for e in exc.errors()]
         return JSONResponse(
             status_code=400,
-            content={"error": "INVALID_REQUEST", "message": "; ".join(errs), "hint": "See /openapi.json for the exact schema."},
+            content={
+                "error": "INVALID_REQUEST",
+                "message": "; ".join(errs),
+                "hint": "See /openapi.json for the exact schema.",
+            },
         )
 
     for r in ALL_ROUTERS:
@@ -64,7 +70,9 @@ def create_app(runtime: Runtime | None = None, *, start_loop: bool = True, mount
         from ..mcp_server import build_mcp_server
 
         mcp = build_mcp_server(rt)
-        mcp_app = mcp.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, json_response=True, host="0.0.0.0")
+        mcp_app = mcp.streamable_http_app(
+            streamable_http_path="/mcp", stateless_http=True, json_response=True, host="0.0.0.0"
+        )
         app.state.mcp_app = mcp_app
         app.mount("/", mcp_app)  # serves /mcp; mounted last so REST routes win
 

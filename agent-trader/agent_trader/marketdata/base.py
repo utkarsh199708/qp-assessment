@@ -72,7 +72,9 @@ class MarketDataProvider(Protocol):
 
     def quotes(self, keys: list[tuple[str, Exchange]] | None = None) -> list[Quote]: ...
 
-    def ohlc(self, symbol: str, exchange: Exchange, interval: str = "1m", limit: int = 100) -> list[Candle]: ...
+    def ohlc(
+        self, symbol: str, exchange: Exchange, interval: str = "1m", limit: int = 100
+    ) -> list[Candle]: ...
 
     def step(self, now: datetime) -> list[Quote]:
         """Advance the provider to ``now`` and return every quote that changed."""

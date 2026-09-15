@@ -91,16 +91,16 @@ def position_to_dict(p: PositionRow, ltp: Decimal | None) -> dict[str, Any]:
     }
 
 
-def ledger_to_dict(l: LedgerRow) -> dict[str, Any]:
+def ledger_to_dict(row: LedgerRow) -> dict[str, Any]:
     return {
-        "id": l.id,
-        "ts": ts(l.ts),
-        "kind": l.kind,
-        "amount": num(l.amount),
-        "cash_after": num(l.cash_after),
-        "blocked_after": num(l.blocked_after),
-        "ref_id": l.ref_id,
-        "note": l.note,
+        "id": row.id,
+        "ts": ts(row.ts),
+        "kind": row.kind,
+        "amount": num(row.amount),
+        "cash_after": num(row.cash_after),
+        "blocked_after": num(row.blocked_after),
+        "ref_id": row.ref_id,
+        "note": row.note,
     }
 
 
@@ -141,4 +141,11 @@ def instrument_to_dict(i: InstrumentInfo) -> dict[str, Any]:
 
 
 def candle_to_dict(c: Candle) -> dict[str, Any]:
-    return {"ts": ts(c.ts), "open": num(c.open), "high": num(c.high), "low": num(c.low), "close": num(c.close), "volume": c.volume}
+    return {
+        "ts": ts(c.ts),
+        "open": num(c.open),
+        "high": num(c.high),
+        "low": num(c.low),
+        "close": num(c.close),
+        "volume": c.volume,
+    }

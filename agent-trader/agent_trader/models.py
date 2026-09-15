@@ -5,7 +5,7 @@ from __future__ import annotations
 import secrets
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -18,24 +18,24 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{secrets.token_hex(8)}"
 
 
-class AgentStatus(str, Enum):
+class AgentStatus(StrEnum):
     ACTIVE = "ACTIVE"
     HALTED = "HALTED"
 
 
-class OrderType(str, Enum):
+class OrderType(StrEnum):
     MARKET = "MARKET"
     LIMIT = "LIMIT"
     SL = "SL"  # stop-loss limit: trigger_price + price
     SL_M = "SL-M"  # stop-loss market: trigger_price only
 
 
-class Validity(str, Enum):
+class Validity(StrEnum):
     DAY = "DAY"
     IOC = "IOC"
 
 
-class OrderStatus(str, Enum):
+class OrderStatus(StrEnum):
     OPEN = "OPEN"  # resting (limit not yet marketable, SL not triggered, or AMO waiting for open)
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
     FILLED = "FILLED"
@@ -48,7 +48,7 @@ class OrderStatus(str, Enum):
         return self in (OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.EXPIRED)
 
 
-class LedgerKind(str, Enum):
+class LedgerKind(StrEnum):
     DEPOSIT = "DEPOSIT"
     BUY = "BUY"  # CNC purchase debit
     SELL = "SELL"  # CNC sale credit
@@ -59,7 +59,7 @@ class LedgerKind(str, Enum):
     ADJUSTMENT = "ADJUSTMENT"
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     AGENT_REGISTERED = "AGENT_REGISTERED"
     AGENT_HALTED = "AGENT_HALTED"
     AGENT_RESUMED = "AGENT_RESUMED"
@@ -235,7 +235,21 @@ class EquitySnapshotRow(Base):
 
 
 __all__ = [
-    "AgentRow", "AgentStatus", "EquitySnapshotRow", "EventRow", "EventType", "Exchange", "LedgerKind",
-    "LedgerRow", "OrderRow", "OrderStatus", "OrderType", "PositionRow", "ProductType", "Side", "TradeRow",
-    "Validity", "new_id",
+    "AgentRow",
+    "AgentStatus",
+    "EquitySnapshotRow",
+    "EventRow",
+    "EventType",
+    "Exchange",
+    "LedgerKind",
+    "LedgerRow",
+    "OrderRow",
+    "OrderStatus",
+    "OrderType",
+    "PositionRow",
+    "ProductType",
+    "Side",
+    "TradeRow",
+    "Validity",
+    "new_id",
 ]

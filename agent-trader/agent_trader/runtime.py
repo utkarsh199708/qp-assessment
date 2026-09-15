@@ -53,7 +53,11 @@ class Runtime:
         if self.loop is None and self.settings.clock_mode != "frozen":
             self.loop = TickLoop(self.engine, self.settings.sim_tick_seconds)
             self.loop.start()
-            log.info("tick loop started (every %.2fs, clock=%s)", self.settings.sim_tick_seconds, self.settings.clock_mode)
+            log.info(
+                "tick loop started (every %.2fs, clock=%s)",
+                self.settings.sim_tick_seconds,
+                self.settings.clock_mode,
+            )
 
     def stop(self) -> None:
         if self.loop:
@@ -68,14 +72,23 @@ def build_market(settings: Settings, clock: MarketClock) -> MarketDataProvider:
 
         return YFinanceMarketData(clock)
     return SimulatedMarketData(
-        clock, seed=settings.sim_seed, vol_scale=settings.sim_volatility_scale, warmup_candles=settings.sim_warmup_candles
+        clock,
+        seed=settings.sim_seed,
+        vol_scale=settings.sim_volatility_scale,
+        warmup_candles=settings.sim_warmup_candles,
     )
 
 
 def build_runtime(settings: Settings | None = None) -> Runtime:
     settings = settings or get_settings()
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    for noisy in ("httpx", "httpx2", "httpcore", "mcp.server.streamable_http", "mcp.server.streamable_http_manager"):
+    for noisy in (
+        "httpx",
+        "httpx2",
+        "httpcore",
+        "mcp.server.streamable_http",
+        "mcp.server.streamable_http_manager",
+    ):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     holidays = DEFAULT_HOLIDAYS | frozenset(settings.extra_holidays)
     clock = MarketClock(mode=settings.clock_mode, frozen_at=settings.frozen_at, holidays=holidays)

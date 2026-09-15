@@ -19,8 +19,13 @@ from .runtime import Runtime, build_runtime
 def frozen_settings(**overrides) -> Settings:
     """Settings for a deterministic in-memory platform frozen at Wed 2026-09-16 09:16 IST."""
     base = dict(
-        database_url="sqlite:///:memory:", clock_mode="frozen", frozen_at=datetime(2026, 9, 16, 9, 16, tzinfo=IST),
-        sim_seed=42, sim_warmup_candles=120, admin_api_key="admin", _env_file=None,
+        database_url="sqlite:///:memory:",
+        clock_mode="frozen",
+        frozen_at=datetime(2026, 9, 16, 9, 16, tzinfo=IST),
+        sim_seed=42,
+        sim_warmup_candles=120,
+        admin_api_key="admin",
+        _env_file=None,
     )
     base.update(overrides)
     return Settings(**base)
@@ -43,7 +48,7 @@ class ServerThread:
         self.server = uvicorn.Server(cfg)
         self.thread = threading.Thread(target=self.server.run, daemon=True, name="agent-trader-uvicorn")
 
-    def start(self, timeout: float = 10.0) -> "ServerThread":
+    def start(self, timeout: float = 10.0) -> ServerThread:
         self.thread.start()
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -65,7 +70,9 @@ class ServerThread:
         self.stop()
 
 
-def in_process_platform(settings: Settings | None = None, *, start_loop: bool | None = None) -> tuple[Runtime, ServerThread]:
+def in_process_platform(
+    settings: Settings | None = None, *, start_loop: bool | None = None
+) -> tuple[Runtime, ServerThread]:
     """Build a runtime + app and serve it on a local port. Returns (runtime, server) — call server.stop() when done."""
     settings = settings or frozen_settings()
     rt = build_runtime(settings)

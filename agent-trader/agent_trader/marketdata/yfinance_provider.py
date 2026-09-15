@@ -12,8 +12,8 @@ from decimal import Decimal
 
 from ..charges import Exchange
 from ..clock import MarketClock
-from ..instruments import UNIVERSE, InstrumentSeed
-from .base import Candle, InstrumentInfo, Quote
+from ..instruments import UNIVERSE
+from .base import Quote
 from .simulator import SimulatedMarketData, round_to_tick
 
 SUFFIX = {Exchange.NSE: ".NS", Exchange.BSE: ".BO"}

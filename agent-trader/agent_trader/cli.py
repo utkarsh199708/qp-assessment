@@ -8,7 +8,9 @@ import sys
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="agent-trader", description="Paper-trading platform for AI agents on NSE/BSE.")
+    p = argparse.ArgumentParser(
+        prog="agent-trader", description="Paper-trading platform for AI agents on NSE/BSE."
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("serve", help="run the REST + MCP (streamable-http at /mcp) server")
@@ -16,14 +18,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--port", type=int, default=None)
     s.add_argument("--reload", action="store_true")
 
-    sub.add_parser("mcp", help="run the MCP server over stdio (for Claude Desktop / Claude Code / any MCP client)")
+    sub.add_parser(
+        "mcp", help="run the MCP server over stdio (for Claude Desktop / Claude Code / any MCP client)"
+    )
 
     r = sub.add_parser("register", help="create an agent against a running server and print its API key")
     r.add_argument("name")
     r.add_argument("--url", default="http://localhost:8000")
     r.add_argument("--cash", type=float, default=None)
 
-    d = sub.add_parser("demo", help="run the bundled example agent in-process against a frozen simulated market")
+    d = sub.add_parser(
+        "demo", help="run the bundled example agent in-process against a frozen simulated market"
+    )
     d.add_argument("--steps", type=int, default=120)
 
     args = p.parse_args(argv)
@@ -34,7 +40,14 @@ def main(argv: list[str] | None = None) -> int:
         from .config import get_settings
 
         st = get_settings()
-        uvicorn.run("agent_trader.api.app:create_app", factory=True, host=args.host or st.host, port=args.port or st.port, reload=args.reload, log_level=st.log_level.lower())
+        uvicorn.run(
+            "agent_trader.api.app:create_app",
+            factory=True,
+            host=args.host or st.host,
+            port=args.port or st.port,
+            reload=args.reload,
+            log_level=st.log_level.lower(),
+        )
         return 0
 
     if args.cmd == "mcp":

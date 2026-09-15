@@ -131,8 +131,16 @@ def make_tools(client: AgentTraderClient):
             trigger_price: Stop trigger for SL / SL-M orders.
         """
         return client.place_order(
-            symbol, side, quantity, order_type=order_type, product=product, price=price, trigger_price=trigger_price,
-            client_order_id=client_order_id, reasoning=reasoning, tag="claude",
+            symbol,
+            side,
+            quantity,
+            order_type=order_type,
+            product=product,
+            price=price,
+            trigger_price=trigger_price,
+            client_order_id=client_order_id,
+            reasoning=reasoning,
+            tag="claude",
         )
 
     @beta_tool
@@ -161,7 +169,17 @@ def make_tools(client: AgentTraderClient):
         """Return %, win rate, profit factor, max drawdown and equity curve for this agent, plus the leaderboard rank of all agents."""
         return {"performance": client.performance(points=50), "leaderboard": client.leaderboard()}
 
-    return [market_status, search_instruments, get_quotes, get_ohlc, get_portfolio, place_order, get_orders, cancel_order, get_performance]
+    return [
+        market_status,
+        search_instruments,
+        get_quotes,
+        get_ohlc,
+        get_portfolio,
+        place_order,
+        get_orders,
+        cancel_order,
+        get_performance,
+    ]
 
 
 def _print_message(message) -> None:
@@ -175,7 +193,11 @@ def _print_message(message) -> None:
 
 
 def run_sdk_mode(url: str, api_key: str | None, name: str, objective: str, model: str = MODEL) -> None:
-    trader = AgentTraderClient(url, api_key=api_key) if api_key else AgentTraderClient.register(url, name=name, description=f"LLM agent ({model})")
+    trader = (
+        AgentTraderClient(url, api_key=api_key)
+        if api_key
+        else AgentTraderClient.register(url, name=name, description=f"LLM agent ({model})")
+    )
     print(f"agent {trader.me()['agent_id']} connected to {url}")
     claude = anthropic.Anthropic()
     runner = claude.beta.messages.tool_runner(
@@ -200,10 +222,15 @@ async def run_mcp_mode(url: str, api_key: str | None, name: str, objective: str,
     from mcp.client.stdio import StdioServerParameters, stdio_client
 
     if api_key is None:
-        api_key = AgentTraderClient.register(url, name=name, description=f"LLM agent via MCP ({model})").api_key
+        api_key = AgentTraderClient.register(
+            url, name=name, description=f"LLM agent via MCP ({model})"
+        ).api_key
     env = {**os.environ, "TRADER_API_KEY": api_key}
     claude = AsyncAnthropic()
-    async with stdio_client(StdioServerParameters(command="agent-trader", args=["mcp"], env=env)) as (read, write):
+    async with stdio_client(StdioServerParameters(command="agent-trader", args=["mcp"], env=env)) as (
+        read,
+        write,
+    ):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = (await session.list_tools()).tools
@@ -228,8 +255,11 @@ if __name__ == "__main__":
     p.add_argument("--name", default="claude-trader")
     p.add_argument("--mode", choices=["sdk", "mcp"], default="sdk")
     p.add_argument("--model", default=MODEL)
-    p.add_argument("--objective", default="Review the market and my portfolio, then build a small diversified CNC book of 3 stocks "
-                   "with clear reasoning, protect each with an SL-M order about 2% below entry, and summarise.")
+    p.add_argument(
+        "--objective",
+        default="Review the market and my portfolio, then build a small diversified CNC book of 3 stocks "
+        "with clear reasoning, protect each with an SL-M order about 2% below entry, and summarise.",
+    )
     a = p.parse_args()
     if a.mode == "sdk":
         run_sdk_mode(a.url, a.api_key, a.name, a.objective, a.model)

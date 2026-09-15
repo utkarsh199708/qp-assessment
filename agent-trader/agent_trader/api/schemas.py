@@ -17,14 +17,18 @@ ValidityStr = Literal["DAY", "IOC"]
 class RiskLimits(BaseModel):
     max_order_value: Decimal | None = Field(None, description="Max ₹ value of a single order")
     max_position_value_per_symbol: Decimal | None = Field(None, description="Max ₹ exposure in one symbol")
-    max_daily_loss: Decimal | None = Field(None, description="Loss for the day (₹) at which the agent is auto-halted")
+    max_daily_loss: Decimal | None = Field(
+        None, description="Loss for the day (₹) at which the agent is auto-halted"
+    )
     max_orders_per_minute: int | None = None
     max_open_orders: int | None = None
 
 
 class RegisterAgentRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=120, description="Agent name (shown on the leaderboard)")
-    initial_cash: Decimal | None = Field(None, description="Opening paper-money balance in ₹ (default ₹10,00,000)")
+    initial_cash: Decimal | None = Field(
+        None, description="Opening paper-money balance in ₹ (default ₹10,00,000)"
+    )
     description: str | None = Field(None, description="What this agent does / which model drives it")
     metadata: dict[str, Any] | None = None
     risk_limits: RiskLimits | None = None
@@ -40,13 +44,23 @@ class PlaceOrderRequest(BaseModel):
     side: SideStr
     quantity: int = Field(..., ge=1)
     exchange: ExchangeStr = "NSE"
-    order_type: OrderTypeStr = Field("MARKET", description="MARKET, LIMIT (needs price), SL (needs price+trigger_price), SL-M (needs trigger_price)")
-    product: ProductStr = Field("CNC", description="CNC = delivery (no shorting). MIS = intraday, 5x leverage, shorting allowed, auto squared-off 15:20 IST")
+    order_type: OrderTypeStr = Field(
+        "MARKET",
+        description="MARKET, LIMIT (needs price), SL (needs price+trigger_price), SL-M (needs trigger_price)",
+    )
+    product: ProductStr = Field(
+        "CNC",
+        description="CNC = delivery (no shorting). MIS = intraday, 5x leverage, shorting allowed, auto squared-off 15:20 IST",
+    )
     validity: ValidityStr = "DAY"
     price: Decimal | None = Field(None, description="Limit price (multiple of tick size 0.05)")
     trigger_price: Decimal | None = Field(None, description="Stop trigger for SL / SL-M")
-    client_order_id: str | None = Field(None, max_length=64, description="Idempotency key: re-sending the same id returns the same order")
-    reasoning: str | None = Field(None, description="Why the agent is placing this order (kept in the audit trail)")
+    client_order_id: str | None = Field(
+        None, max_length=64, description="Idempotency key: re-sending the same id returns the same order"
+    )
+    reasoning: str | None = Field(
+        None, description="Why the agent is placing this order (kept in the audit trail)"
+    )
     tag: str | None = Field(None, max_length=64)
 
 

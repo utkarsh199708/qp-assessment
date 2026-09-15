@@ -22,7 +22,13 @@ class Event:
     payload: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "ts": self.ts.isoformat(), "type": self.type, "agent_id": self.agent_id, **self.payload}
+        return {
+            "id": self.id,
+            "ts": self.ts.isoformat(),
+            "type": self.type,
+            "agent_id": self.agent_id,
+            **self.payload,
+        }
 
 
 class EventBus:
@@ -46,7 +52,9 @@ class EventBus:
         with self._lock:
             return self._next - 1
 
-    def since(self, cursor: int, *, agent_id: str | None = None, types: set[str] | None = None, limit: int = 500) -> list[Event]:
+    def since(
+        self, cursor: int, *, agent_id: str | None = None, types: set[str] | None = None, limit: int = 500
+    ) -> list[Event]:
         with self._lock:
             out = []
             for ev in self._buf:

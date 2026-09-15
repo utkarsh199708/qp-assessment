@@ -8,6 +8,7 @@ against its quotes.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import logging
 import math
@@ -15,14 +16,14 @@ import secrets
 import threading
 from collections import deque
 from datetime import date, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..charges import ChargeSchedule, Exchange, ProductType, Side, compute_charges, to_paise
-from ..clock import NORMAL_END, IST, MarketClock, MarketPhase
+from ..clock import IST, NORMAL_END, MarketClock, MarketPhase
 from ..config import Settings
 from ..marketdata.base import MarketDataProvider, Quote
 from ..marketdata.simulator import round_to_tick
@@ -41,7 +42,16 @@ from ..models import (
     TradeRow,
     Validity,
 )
-from .errors import AgentHalted, Conflict, InvalidRequest, NotFound, OrderRejected, RateLimited, Unauthorized
+from .errors import (
+    AgentHalted,
+    Conflict,
+    InvalidRequest,
+    NotFound,
+    OrderRejected,
+    RateLimited,
+    TradingError,
+    Unauthorized,
+)
 from .events import Event, EventBus
 from .positions import apply_fill
 from .serialize import (
@@ -68,7 +78,9 @@ def _hash_key(key: str) -> str:
 
 
 class TradingEngine:
-    def __init__(self, settings: Settings, clock: MarketClock, market: MarketDataProvider, session_factory) -> None:
+    def __init__(
+        self, settings: Settings, clock: MarketClock, market: MarketDataProvider, session_factory
+    ) -> None:
         self.settings = settings
         self.clock = clock
         self.market = market
@@ -94,17 +106,39 @@ class TradingEngine:
     def _now(self) -> datetime:
         return self.clock.now()
 
-    def _emit(self, s: Session, type_: EventType, agent_id: str | None, payload: dict[str, Any], *, persist: bool = True) -> Event:
+    def _emit(
+        self,
+        s: Session,
+        type_: EventType,
+        agent_id: str | None,
+        payload: dict[str, Any],
+        *,
+        persist: bool = True,
+    ) -> Event:
         now = self._now()
         if persist:
             s.add(EventRow(ts=now, agent_id=agent_id, type=type_.value, payload=payload))
         return self.bus.publish(now, type_.value, agent_id, payload)
 
-    def _ledger(self, s: Session, agent: AgentRow, kind: LedgerKind, amount: Decimal, ref_id: str | None, note: str | None = None) -> None:
+    def _ledger(
+        self,
+        s: Session,
+        agent: AgentRow,
+        kind: LedgerKind,
+        amount: Decimal,
+        ref_id: str | None,
+        note: str | None = None,
+    ) -> None:
         s.add(
             LedgerRow(
-                agent_id=agent.id, ts=self._now(), kind=kind.value, amount=to_paise(amount),
-                cash_after=agent.cash, blocked_after=agent.blocked_cash, ref_id=ref_id, note=note,
+                agent_id=agent.id,
+                ts=self._now(),
+                kind=kind.value,
+                amount=to_paise(amount),
+                cash_after=agent.cash,
+                blocked_after=agent.blocked_cash,
+                ref_id=ref_id,
+                note=note,
             )
         )
 
@@ -114,12 +148,32 @@ class TradingEngine:
             raise NotFound(f"agent {agent_id} not found")
         return agent
 
+    @staticmethod
+    def parse_symbol(symbol: str, exchange: Exchange | str = Exchange.NSE) -> tuple[str, Exchange]:
+        """Accept ``"INFY"`` + exchange or the exchange-qualified form ``"NSE:INFY"`` / ``"BSE:INFY"``."""
+        symbol = (symbol or "").strip().upper()
+        if ":" in symbol:
+            prefix, _, rest = symbol.partition(":")
+            if prefix not in Exchange.__members__:
+                raise InvalidRequest(
+                    f"unknown exchange prefix {prefix!r} in {symbol!r}", hint="Use NSE:SYMBOL or BSE:SYMBOL."
+                )
+            return rest, Exchange(prefix)
+        try:
+            return symbol, Exchange(exchange)
+        except ValueError as e:
+            raise InvalidRequest(f"unknown exchange {exchange!r}", hint="Use NSE or BSE.") from e
+
     def _quote_or_raise(self, symbol: str, exchange: Exchange) -> Quote:
         q = self.market.quote(symbol, exchange)
         if q is None:
+            universe = [i.symbol for i in self.market.instruments() if i.exchange == exchange]
+            close = difflib.get_close_matches(symbol, universe, n=3, cutoff=0.6)
+            hint = "Call search_instruments to find valid symbols (e.g. RELIANCE, TCS, INFY)."
+            if close:
+                hint = f"Did you mean {', '.join(close)}? " + hint
             raise NotFound(
-                f"unknown instrument {symbol} on {exchange.value}",
-                hint="Call search_instruments to find valid symbols (e.g. RELIANCE, TCS, INFY).",
+                f"unknown instrument {symbol} on {exchange.value}", hint=hint, details={"did_you_mean": close}
             )
         return q
 
@@ -167,7 +221,9 @@ class TradingEngine:
                 cash=cash,
                 blocked_cash=ZERO,
                 max_order_value=Decimal(str(risk.get("max_order_value", st.risk_max_order_value))),
-                max_position_value_per_symbol=Decimal(str(risk.get("max_position_value_per_symbol", st.risk_max_position_value_per_symbol))),
+                max_position_value_per_symbol=Decimal(
+                    str(risk.get("max_position_value_per_symbol", st.risk_max_position_value_per_symbol))
+                ),
                 max_daily_loss=Decimal(str(risk.get("max_daily_loss", st.risk_max_daily_loss))),
                 max_orders_per_minute=int(risk.get("max_orders_per_minute", st.risk_max_orders_per_minute)),
                 max_open_orders=int(risk.get("max_open_orders", st.risk_max_open_orders)),
@@ -185,7 +241,9 @@ class TradingEngine:
 
     def authenticate(self, api_key: str | None) -> dict[str, Any]:
         if not api_key:
-            raise Unauthorized("missing API key", hint="Send the key from register_agent in the X-API-Key header.")
+            raise Unauthorized(
+                "missing API key", hint="Send the key from register_agent in the X-API-Key header."
+            )
         with self._session() as s:
             agent = s.scalar(select(AgentRow).where(AgentRow.api_key_hash == _hash_key(api_key)))
             if agent is None:
@@ -203,7 +261,13 @@ class TradingEngine:
             return [self.agent_to_dict(a) for a in s.scalars(select(AgentRow).order_by(AgentRow.created_at))]
 
     def update_risk_limits(self, agent_id: str, risk: dict[str, Any]) -> dict[str, Any]:
-        allowed = {"max_order_value", "max_position_value_per_symbol", "max_daily_loss", "max_orders_per_minute", "max_open_orders"}
+        allowed = {
+            "max_order_value",
+            "max_position_value_per_symbol",
+            "max_daily_loss",
+            "max_orders_per_minute",
+            "max_open_orders",
+        }
         bad = set(risk) - allowed
         if bad:
             raise InvalidRequest(f"unknown risk fields: {sorted(bad)}", details={"allowed": sorted(allowed)})
@@ -292,7 +356,9 @@ class TradingEngine:
         st["instrument_count"] = len(self.market.instruments())
         return st
 
-    def instruments(self, query: str | None = None, exchange: Exchange | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    def instruments(
+        self, query: str | None = None, exchange: Exchange | None = None, limit: int = 200
+    ) -> list[dict[str, Any]]:
         out = []
         q = (query or "").strip().upper()
         for i in self.market.instruments():
@@ -305,18 +371,28 @@ class TradingEngine:
                 break
         return out
 
-    def quote(self, symbol: str, exchange: Exchange = Exchange.NSE) -> dict[str, Any]:
-        return quote_to_dict(self._quote_or_raise(symbol.upper(), exchange))
+    def quote(self, symbol: str, exchange: Exchange | str = Exchange.NSE) -> dict[str, Any]:
+        symbol, exchange = self.parse_symbol(symbol, exchange)
+        return quote_to_dict(self._quote_or_raise(symbol, exchange))
 
-    def quotes(self, symbols: list[str] | None = None, exchange: Exchange = Exchange.NSE) -> list[dict[str, Any]]:
+    def quotes(
+        self, symbols: list[str] | None = None, exchange: Exchange | str = Exchange.NSE
+    ) -> list[dict[str, Any]]:
+        exchange = Exchange(exchange)
         if symbols is None:
             return [quote_to_dict(q) for q in self.market.quotes() if q.exchange == exchange]
-        return [quote_to_dict(q) for q in self.market.quotes([(s.upper(), exchange) for s in symbols])]
+        return [
+            quote_to_dict(q)
+            for q in self.market.quotes([self.parse_symbol(sym, exchange) for sym in symbols])
+        ]
 
-    def ohlc(self, symbol: str, exchange: Exchange = Exchange.NSE, interval: str = "1m", limit: int = 100) -> list[dict[str, Any]]:
-        self._quote_or_raise(symbol.upper(), exchange)
+    def ohlc(
+        self, symbol: str, exchange: Exchange | str = Exchange.NSE, interval: str = "1m", limit: int = 100
+    ) -> list[dict[str, Any]]:
+        symbol, exchange = self.parse_symbol(symbol, exchange)
+        self._quote_or_raise(symbol, exchange)
         try:
-            candles = self.market.ohlc(symbol.upper(), exchange, interval, max(1, min(limit, 1000)))
+            candles = self.market.ohlc(symbol, exchange, interval, max(1, min(limit, 1000)))
         except ValueError as e:
             raise InvalidRequest(str(e)) from e
         return [candle_to_dict(c) for c in candles]
@@ -344,12 +420,54 @@ class TradingEngine:
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Validate, risk-check and (unless ``dry_run``) accept an order, executing it immediately if marketable."""
-        symbol = symbol.upper().strip()
-        exchange = Exchange(exchange)
-        side = Side(side)
-        order_type = OrderType(order_type)
-        product = ProductType(product)
-        validity = Validity(validity)
+        request = {
+            "symbol": symbol,
+            "exchange": str(getattr(exchange, "value", exchange)),
+            "side": str(getattr(side, "value", side)),
+            "quantity": quantity,
+            "order_type": str(getattr(order_type, "value", order_type)),
+            "product": str(getattr(product, "value", product)),
+            "validity": str(getattr(validity, "value", validity)),
+            "price": None if price is None else float(price),
+            "trigger_price": None if trigger_price is None else float(trigger_price),
+            "client_order_id": client_order_id,
+            "reasoning": reasoning,
+            "tag": tag,
+        }
+        try:
+            return self._place_order(agent_id, request, dry_run=dry_run)
+        except TradingError as e:
+            if not dry_run:
+                self._record_rejection(agent_id, request, e)
+            raise
+
+    def _record_rejection(self, agent_id: str, request: dict[str, Any], err: TradingError) -> None:
+        """Rejected orders never become order rows, but they are part of the audit trail."""
+        try:
+            with self.lock, self._session() as s:
+                self._emit(s, EventType.ORDER_REJECTED, agent_id, {"request": request, **err.to_dict()})
+                s.commit()
+        except Exception:  # auditing must never mask the original error
+            log.exception("failed to record rejection")
+
+    def _place_order(self, agent_id: str, req: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
+        symbol, exchange = self.parse_symbol(req["symbol"], req["exchange"])
+        try:
+            side = Side(req["side"].upper())
+            order_type = OrderType(req["order_type"].upper())
+            product = ProductType(req["product"].upper())
+            validity = Validity(req["validity"].upper())
+        except ValueError as e:
+            raise InvalidRequest(
+                str(e),
+                hint="side: BUY|SELL; order_type: MARKET|LIMIT|SL|SL-M; product: CNC|MIS; validity: DAY|IOC.",
+            ) from e
+        quantity = req["quantity"]
+        price = req["price"]
+        trigger_price = req["trigger_price"]
+        client_order_id, reasoning, tag = req["client_order_id"], req["reasoning"], req["tag"]
+        if not isinstance(quantity, int) or isinstance(quantity, bool):
+            raise InvalidRequest("quantity must be an integer number of shares")
         price_d = Decimal(str(price)) if price is not None else None
         trig_d = Decimal(str(trigger_price)) if trigger_price is not None else None
 
@@ -360,13 +478,19 @@ class TradingEngine:
             # idempotency: same client_order_id → return the existing order (or 409 if different)
             if client_order_id:
                 existing = s.scalar(
-                    select(OrderRow).where(OrderRow.agent_id == agent.id, OrderRow.client_order_id == client_order_id)
+                    select(OrderRow).where(
+                        OrderRow.agent_id == agent.id, OrderRow.client_order_id == client_order_id
+                    )
                 )
                 if existing is not None:
                     same = (
-                        existing.symbol == symbol and existing.exchange == exchange.value and existing.side == side.value
-                        and existing.quantity == quantity and existing.order_type == order_type.value
-                        and existing.product == product.value and existing.price == price_d
+                        existing.symbol == symbol
+                        and existing.exchange == exchange.value
+                        and existing.side == side.value
+                        and existing.quantity == quantity
+                        and existing.order_type == order_type.value
+                        and existing.product == product.value
+                        and existing.price == price_d
                         and existing.trigger_price == trig_d
                     )
                     if same:
@@ -403,11 +527,17 @@ class TradingEngine:
             if needs_price and price_d is None:
                 raise InvalidRequest(f"{order_type.value} orders require price")
             if not needs_price and price_d is not None:
-                raise InvalidRequest(f"{order_type.value} orders must not carry price", hint="Omit price, or use order_type=LIMIT.")
+                raise InvalidRequest(
+                    f"{order_type.value} orders must not carry price",
+                    hint="Omit price, or use order_type=LIMIT.",
+                )
             if needs_trigger and trig_d is None:
                 raise InvalidRequest(f"{order_type.value} orders require trigger_price")
             if not needs_trigger and trig_d is not None:
-                raise InvalidRequest(f"{order_type.value} orders must not carry trigger_price", hint="Use order_type=SL or SL-M for stop orders.")
+                raise InvalidRequest(
+                    f"{order_type.value} orders must not carry trigger_price",
+                    hint="Use order_type=SL or SL-M for stop orders.",
+                )
 
             for label, v in (("price", price_d), ("trigger_price", trig_d)):
                 if v is None:
@@ -424,7 +554,10 @@ class TradingEngine:
                     raise OrderRejected(
                         f"{label} {v} is outside today's price band {quote.lower_circuit}–{quote.upper_circuit}",
                         hint="Orders outside the circuit band are rejected by the exchange; choose a price inside the band.",
-                        details={"lower_circuit": num(quote.lower_circuit), "upper_circuit": num(quote.upper_circuit)},
+                        details={
+                            "lower_circuit": num(quote.lower_circuit),
+                            "upper_circuit": num(quote.upper_circuit),
+                        },
                     )
 
             if order_type in (OrderType.SL, OrderType.SL_M):
@@ -460,7 +593,9 @@ class TradingEngine:
             # --- risk checks ------------------------------------------------------------
             self._check_rate_limit(agent, now)
             open_count = s.scalar(
-                select(func.count()).select_from(OrderRow).where(OrderRow.agent_id == agent.id, OrderRow.status.in_(OPEN_STATUSES))
+                select(func.count())
+                .select_from(OrderRow)
+                .where(OrderRow.agent_id == agent.id, OrderRow.status.in_(OPEN_STATUSES))
             )
             if open_count >= agent.max_open_orders:
                 raise OrderRejected(
@@ -487,7 +622,10 @@ class TradingEngine:
                 if projected > agent.max_position_value_per_symbol:
                     raise OrderRejected(
                         f"projected position value ₹{projected} in {symbol} exceeds max_position_value_per_symbol ₹{agent.max_position_value_per_symbol}",
-                        details={"projected_position_value": num(projected), "limit": num(agent.max_position_value_per_symbol)},
+                        details={
+                            "projected_position_value": num(projected),
+                            "limit": num(agent.max_position_value_per_symbol),
+                        },
                     )
 
             if product == ProductType.CNC and side == Side.SELL:
@@ -501,7 +639,12 @@ class TradingEngine:
                     )
 
             est_charges = compute_charges(
-                side=side, product=product, exchange=exchange, quantity=quantity, price=ref_price, schedule=self.charge_schedule,
+                side=side,
+                product=product,
+                exchange=exchange,
+                quantity=quantity,
+                price=ref_price,
+                schedule=self.charge_schedule,
             ).total
             block = self._required_block(product, side, quantity, ref_price, cur_qty, est_charges)
             if block > agent.cash:
@@ -509,33 +652,64 @@ class TradingEngine:
                     f"insufficient funds: need ₹{block} (incl. est. charges ₹{est_charges}), free cash ₹{agent.cash}",
                     hint="Reduce quantity, cancel resting BUY orders to unblock cash, or use MIS which needs only "
                     f"{(100 / self.mis_leverage):.0f}% margin.",
-                    details={"required": num(block), "available_cash": num(agent.cash), "blocked_cash": num(agent.blocked_cash)},
+                    details={
+                        "required": num(block),
+                        "available_cash": num(agent.cash),
+                        "blocked_cash": num(agent.blocked_cash),
+                    },
                 )
 
             if dry_run:
                 return {
                     "dry_run": True,
                     "would_be_accepted": True,
-                    "symbol": symbol, "exchange": exchange.value, "side": side.value, "quantity": quantity,
-                    "order_type": order_type.value, "product": product.value, "validity": validity.value,
-                    "reference_price": num(to_paise(ref_price)), "order_value": num(order_value),
-                    "estimated_charges": num(est_charges), "cash_to_block": num(block),
+                    "symbol": symbol,
+                    "exchange": exchange.value,
+                    "side": side.value,
+                    "quantity": quantity,
+                    "order_type": order_type.value,
+                    "product": product.value,
+                    "validity": validity.value,
+                    "reference_price": num(to_paise(ref_price)),
+                    "order_value": num(order_value),
+                    "estimated_charges": num(est_charges),
+                    "cash_to_block": num(block),
                     "free_cash_after_block": num(agent.cash - block),
-                    "would_execute_now": phase == MarketPhase.NORMAL and order_type in (OrderType.MARKET,) or (
-                        order_type == OrderType.LIMIT and phase == MarketPhase.NORMAL and (
-                            (side == Side.BUY and quote.ask <= price_d) or (side == Side.SELL and quote.bid >= price_d)
+                    "would_execute_now": phase == MarketPhase.NORMAL
+                    and order_type in (OrderType.MARKET,)
+                    or (
+                        order_type == OrderType.LIMIT
+                        and phase == MarketPhase.NORMAL
+                        and (
+                            (side == Side.BUY and quote.ask <= price_d)
+                            or (side == Side.SELL and quote.bid >= price_d)
                         )
                     ),
                     "market_phase": phase.value,
-                    "ltp": num(quote.ltp), "bid": num(quote.bid), "ask": num(quote.ask),
+                    "ltp": num(quote.ltp),
+                    "bid": num(quote.bid),
+                    "ask": num(quote.ask),
                 }
 
             # --- accept -----------------------------------------------------------------
             order = OrderRow(
-                agent_id=agent.id, client_order_id=client_order_id, symbol=symbol, exchange=exchange.value,
-                side=side.value, order_type=order_type.value, product=product.value, validity=validity.value,
-                quantity=quantity, price=price_d, trigger_price=trig_d, status=OrderStatus.OPEN.value,
-                blocked_cash=block, reasoning=reasoning, tag=tag, created_at=now, updated_at=now,
+                agent_id=agent.id,
+                client_order_id=client_order_id,
+                symbol=symbol,
+                exchange=exchange.value,
+                side=side.value,
+                order_type=order_type.value,
+                product=product.value,
+                validity=validity.value,
+                quantity=quantity,
+                price=price_d,
+                trigger_price=trig_d,
+                status=OrderStatus.OPEN.value,
+                blocked_cash=block,
+                reasoning=reasoning,
+                tag=tag,
+                created_at=now,
+                updated_at=now,
                 expires_at=self._expiry_for(now),
             )
             s.add(order)
@@ -576,8 +750,13 @@ class TradingEngine:
             return out
 
     def modify_order(
-        self, agent_id: str, order_id: str, *, quantity: int | None = None,
-        price: Decimal | float | None = None, trigger_price: Decimal | float | None = None,
+        self,
+        agent_id: str,
+        order_id: str,
+        *,
+        quantity: int | None = None,
+        price: Decimal | float | None = None,
+        trigger_price: Decimal | float | None = None,
     ) -> dict[str, Any]:
         with self.lock, self._session() as s:
             agent = self._get_agent(s, agent_id)
@@ -593,7 +772,10 @@ class TradingEngine:
                 raise InvalidRequest(f"quantity must be >= filled quantity ({order.filled_quantity})")
             if order.order_type in (OrderType.MARKET.value, OrderType.SL_M.value) and price is not None:
                 raise InvalidRequest(f"{order.order_type} orders have no price")
-            if order.order_type in (OrderType.MARKET.value, OrderType.LIMIT.value) and trigger_price is not None:
+            if (
+                order.order_type in (OrderType.MARKET.value, OrderType.LIMIT.value)
+                and trigger_price is not None
+            ):
                 raise InvalidRequest(f"{order.order_type} orders have no trigger_price")
             exchange = Exchange(order.exchange)
             quote = self._quote_or_raise(order.symbol, exchange)
@@ -604,7 +786,9 @@ class TradingEngine:
                 if round_to_tick(v, info.tick_size) != v:
                     raise InvalidRequest(f"{label} {v} is not a multiple of tick size {info.tick_size}")
                 if not (quote.lower_circuit <= v <= quote.upper_circuit):
-                    raise OrderRejected(f"{label} {v} is outside the price band {quote.lower_circuit}–{quote.upper_circuit}")
+                    raise OrderRejected(
+                        f"{label} {v} is outside the price band {quote.lower_circuit}–{quote.upper_circuit}"
+                    )
 
             # re-block cash for the new remaining size
             side, product = Side(order.side), ProductType(order.product)
@@ -612,12 +796,22 @@ class TradingEngine:
             remaining = new_qty - order.filled_quantity
             ref = self._reference_price(OrderType(order.order_type), side, new_price, new_trig, quote)
             pos = self._get_position(s, agent.id, order.symbol, exchange, product)
-            est = compute_charges(side=side, product=product, exchange=exchange, quantity=remaining, price=ref, schedule=self.charge_schedule).total
+            est = compute_charges(
+                side=side,
+                product=product,
+                exchange=exchange,
+                quantity=remaining,
+                price=ref,
+                schedule=self.charge_schedule,
+            ).total
             block = self._required_block(product, side, remaining, ref, pos.quantity if pos else 0, est)
             if block > agent.cash:
                 self._cancel(s, agent, order, "insufficient funds after modification")
                 s.commit()
-                raise OrderRejected("insufficient funds for the modified order; the order was cancelled", details={"required": num(block), "available_cash": num(agent.cash)})
+                raise OrderRejected(
+                    "insufficient funds for the modified order; the order was cancelled",
+                    details={"required": num(block), "available_cash": num(agent.cash)},
+                )
             if block > 0:
                 agent.cash -= block
                 agent.blocked_cash += block
@@ -635,7 +829,9 @@ class TradingEngine:
             agent = self._get_agent(s, agent_id)
             return order_to_dict(self._get_order(s, agent, order_id))
 
-    def list_orders(self, agent_id: str, *, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def list_orders(
+        self, agent_id: str, *, status: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
         with self._session() as s:
             q = select(OrderRow).where(OrderRow.agent_id == agent_id)
             if status == "open":
@@ -647,13 +843,23 @@ class TradingEngine:
 
     def list_trades(self, agent_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
         with self._session() as s:
-            q = select(TradeRow).where(TradeRow.agent_id == agent_id).order_by(TradeRow.executed_at.desc()).limit(max(1, min(limit, 500)))
+            q = (
+                select(TradeRow)
+                .where(TradeRow.agent_id == agent_id)
+                .order_by(TradeRow.executed_at.desc())
+                .limit(max(1, min(limit, 500)))
+            )
             return [trade_to_dict(t) for t in s.scalars(q)]
 
     def ledger(self, agent_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
         with self._session() as s:
-            q = select(LedgerRow).where(LedgerRow.agent_id == agent_id).order_by(LedgerRow.id.desc()).limit(max(1, min(limit, 1000)))
-            return [ledger_to_dict(l) for l in s.scalars(q)]
+            q = (
+                select(LedgerRow)
+                .where(LedgerRow.agent_id == agent_id)
+                .order_by(LedgerRow.id.desc())
+                .limit(max(1, min(limit, 1000)))
+            )
+            return [ledger_to_dict(row) for row in s.scalars(q)]
 
     # =====================================================================================
     # portfolio
@@ -698,9 +904,20 @@ class TradingEngine:
                 mis_unrealised += (ltp - p.average_price) * p.quantity
             positions.append(position_to_dict(p, ltp))
         equity = to_paise(agent.cash + agent.blocked_cash + holdings_value + mis_unrealised)
-        charges = s.scalar(select(func.count()).select_from(TradeRow).where(TradeRow.agent_id == agent.id)) or 0
-        total_charges = sum((t.charges for t in s.scalars(select(TradeRow).where(TradeRow.agent_id == agent.id))), ZERO)
-        open_orders = s.scalar(select(func.count()).select_from(OrderRow).where(OrderRow.agent_id == agent.id, OrderRow.status.in_(OPEN_STATUSES))) or 0
+        charges = (
+            s.scalar(select(func.count()).select_from(TradeRow).where(TradeRow.agent_id == agent.id)) or 0
+        )
+        total_charges = sum(
+            (t.charges for t in s.scalars(select(TradeRow).where(TradeRow.agent_id == agent.id))), ZERO
+        )
+        open_orders = (
+            s.scalar(
+                select(func.count())
+                .select_from(OrderRow)
+                .where(OrderRow.agent_id == agent.id, OrderRow.status.in_(OPEN_STATUSES))
+            )
+            or 0
+        )
         day_start = agent.day_start_equity if agent.day_start_equity is not None else agent.initial_cash
         return {
             "agent_id": agent.id,
@@ -713,7 +930,9 @@ class TradingEngine:
             "equity": num(equity),
             "initial_cash": num(agent.initial_cash),
             "total_pnl": num(to_paise(equity - agent.initial_cash)),
-            "total_return_pct": num(((equity - agent.initial_cash) / agent.initial_cash * 100).quantize(PAISE)),
+            "total_return_pct": num(
+                ((equity - agent.initial_cash) / agent.initial_cash * 100).quantize(PAISE)
+            ),
             "day_pnl": num(to_paise(equity - day_start)),
             "unrealised_pnl": num(to_paise((holdings_value - cnc_cost) + mis_unrealised)),
             "realised_pnl": num(to_paise(realised)),
@@ -733,7 +952,10 @@ class TradingEngine:
             closing = [t for t in trades if t.realised_pnl != 0]
             wins = [t for t in closing if t.realised_pnl > 0]
             snaps = s.scalars(
-                select(EquitySnapshotRow).where(EquitySnapshotRow.agent_id == agent.id).order_by(EquitySnapshotRow.ts.desc()).limit(points)
+                select(EquitySnapshotRow)
+                .where(EquitySnapshotRow.agent_id == agent.id)
+                .order_by(EquitySnapshotRow.ts.desc())
+                .limit(points)
             ).all()[::-1]
             curve = [{"ts": ts(x.ts), "equity": num(x.equity)} for x in snaps]
             peak, max_dd = agent.initial_cash, ZERO
@@ -743,10 +965,26 @@ class TradingEngine:
             gross_win = sum((t.realised_pnl for t in wins), ZERO)
             gross_loss = -sum((t.realised_pnl for t in closing if t.realised_pnl < 0), ZERO)
             return {
-                **{k: summary[k] for k in ("agent_id", "name", "equity", "initial_cash", "total_pnl", "total_return_pct", "day_pnl", "realised_pnl", "unrealised_pnl", "total_charges")},
+                **{
+                    k: summary[k]
+                    for k in (
+                        "agent_id",
+                        "name",
+                        "equity",
+                        "initial_cash",
+                        "total_pnl",
+                        "total_return_pct",
+                        "day_pnl",
+                        "realised_pnl",
+                        "unrealised_pnl",
+                        "total_charges",
+                    )
+                },
                 "trade_count": len(trades),
                 "closing_trade_count": len(closing),
-                "win_rate_pct": num((Decimal(len(wins)) / len(closing) * 100).quantize(PAISE)) if closing else None,
+                "win_rate_pct": num((Decimal(len(wins)) / len(closing) * 100).quantize(PAISE))
+                if closing
+                else None,
                 "profit_factor": num((gross_win / gross_loss).quantize(PAISE)) if gross_loss else None,
                 "max_drawdown_pct": num(max_dd.quantize(PAISE)),
                 "equity_curve": curve,
@@ -757,7 +995,23 @@ class TradingEngine:
             rows = []
             for a in s.scalars(select(AgentRow)):
                 p = self._portfolio_summary(s, a)
-                rows.append({k: p[k] for k in ("agent_id", "name", "status", "equity", "initial_cash", "total_pnl", "total_return_pct", "day_pnl", "trade_count", "total_charges")})
+                rows.append(
+                    {
+                        k: p[k]
+                        for k in (
+                            "agent_id",
+                            "name",
+                            "status",
+                            "equity",
+                            "initial_cash",
+                            "total_pnl",
+                            "total_return_pct",
+                            "day_pnl",
+                            "trade_count",
+                            "total_charges",
+                        )
+                    }
+                )
             rows.sort(key=lambda r: r["total_return_pct"], reverse=True)
             for i, r in enumerate(rows, 1):
                 r["rank"] = i
@@ -767,17 +1021,27 @@ class TradingEngine:
     # events
     # =====================================================================================
 
-    def events_since(self, agent_id: str | None, cursor: int, *, wait_seconds: float = 0, limit: int = 200) -> dict[str, Any]:
+    def events_since(
+        self, agent_id: str | None, cursor: int, *, wait_seconds: float = 0, limit: int = 200
+    ) -> dict[str, Any]:
         if wait_seconds > 0:
             self.bus.wait(cursor, min(wait_seconds, 60))
         evs = self.bus.since(cursor, agent_id=agent_id, limit=limit)
-        return {"cursor": evs[-1].id if evs else max(cursor, self.bus.cursor if cursor == 0 else cursor), "events": [e.to_dict() for e in evs]}
+        return {
+            "cursor": evs[-1].id if evs else max(cursor, self.bus.cursor if cursor == 0 else cursor),
+            "events": [e.to_dict() for e in evs],
+        }
 
     def audit_log(self, agent_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
         from .serialize import event_row_to_dict
 
         with self._session() as s:
-            q = select(EventRow).where(EventRow.agent_id == agent_id).order_by(EventRow.id.desc()).limit(max(1, min(limit, 1000)))
+            q = (
+                select(EventRow)
+                .where(EventRow.agent_id == agent_id)
+                .order_by(EventRow.id.desc())
+                .limit(max(1, min(limit, 1000)))
+            )
             return [event_row_to_dict(e) for e in s.scalars(q)]
 
     # =====================================================================================
@@ -790,7 +1054,15 @@ class TradingEngine:
             now = self._now()
             changed = self.market.step(now)
             phase = self.clock.phase(now)
-            stats = {"ts": ts(now), "phase": phase.value, "quotes_changed": len(changed), "fills": 0, "expired": 0, "squared_off": 0, "halted": 0}
+            stats = {
+                "ts": ts(now),
+                "phase": phase.value,
+                "quotes_changed": len(changed),
+                "fills": 0,
+                "expired": 0,
+                "squared_off": 0,
+                "halted": 0,
+            }
             with self._session() as s:
                 if phase == MarketPhase.NORMAL:
                     stats["fills"] = self._process_open_orders(s, now, phase)
@@ -803,12 +1075,16 @@ class TradingEngine:
                 s.commit()
             self.tick_count += 1
             if changed:
-                self.bus.publish(now, EventType.TICK.value, None, {"quotes_changed": len(changed), "phase": phase.value})
+                self.bus.publish(
+                    now, EventType.TICK.value, None, {"quotes_changed": len(changed), "phase": phase.value}
+                )
             return stats
 
     def _process_open_orders(self, s: Session, now: datetime, phase: MarketPhase) -> int:
         fills = 0
-        for order in s.scalars(select(OrderRow).where(OrderRow.status.in_(OPEN_STATUSES)).order_by(OrderRow.created_at)).all():
+        for order in s.scalars(
+            select(OrderRow).where(OrderRow.status.in_(OPEN_STATUSES)).order_by(OrderRow.created_at)
+        ).all():
             agent = s.get(AgentRow, order.agent_id)
             before = order.filled_quantity
             self._try_execute(s, agent, order, now, phase)
@@ -818,7 +1094,9 @@ class TradingEngine:
 
     def _expire_orders(self, s: Session, now: datetime) -> int:
         n = 0
-        for order in s.scalars(select(OrderRow).where(OrderRow.status.in_(OPEN_STATUSES), OrderRow.expires_at <= now)).all():
+        for order in s.scalars(
+            select(OrderRow).where(OrderRow.status.in_(OPEN_STATUSES), OrderRow.expires_at <= now)
+        ).all():
             agent = s.get(AgentRow, order.agent_id)
             self._release_block(s, agent, order, order.blocked_cash, "released on expiry")
             order.status = OrderStatus.EXPIRED.value
@@ -830,17 +1108,36 @@ class TradingEngine:
 
     def _square_off_mis(self, s: Session, now: datetime, phase: MarketPhase) -> int:
         n = 0
-        for order in s.scalars(select(OrderRow).where(OrderRow.status.in_(OPEN_STATUSES), OrderRow.product == ProductType.MIS.value)).all():
-            self._cancel(s, s.get(AgentRow, order.agent_id), order, "open MIS orders are cancelled at 15:20 square-off")
-        for pos in s.scalars(select(PositionRow).where(PositionRow.product == ProductType.MIS.value, PositionRow.quantity != 0)).all():
+        for order in s.scalars(
+            select(OrderRow).where(
+                OrderRow.status.in_(OPEN_STATUSES), OrderRow.product == ProductType.MIS.value
+            )
+        ).all():
+            self._cancel(
+                s, s.get(AgentRow, order.agent_id), order, "open MIS orders are cancelled at 15:20 square-off"
+            )
+        for pos in s.scalars(
+            select(PositionRow).where(PositionRow.product == ProductType.MIS.value, PositionRow.quantity != 0)
+        ).all():
             agent = s.get(AgentRow, pos.agent_id)
             side = Side.SELL if pos.quantity > 0 else Side.BUY
             order = OrderRow(
-                agent_id=agent.id, symbol=pos.symbol, exchange=pos.exchange, side=side.value,
-                order_type=OrderType.MARKET.value, product=ProductType.MIS.value, validity=Validity.IOC.value,
-                quantity=abs(pos.quantity), status=OrderStatus.OPEN.value, blocked_cash=ZERO, is_system=True,
-                tag="AUTO_SQUARE_OFF", reasoning="system: MIS auto square-off at 15:20 IST",
-                created_at=now, updated_at=now, expires_at=self._expiry_for(now),
+                agent_id=agent.id,
+                symbol=pos.symbol,
+                exchange=pos.exchange,
+                side=side.value,
+                order_type=OrderType.MARKET.value,
+                product=ProductType.MIS.value,
+                validity=Validity.IOC.value,
+                quantity=abs(pos.quantity),
+                status=OrderStatus.OPEN.value,
+                blocked_cash=ZERO,
+                is_system=True,
+                tag="AUTO_SQUARE_OFF",
+                reasoning="system: MIS auto square-off at 15:20 IST",
+                created_at=now,
+                updated_at=now,
+                expires_at=self._expiry_for(now),
             )
             s.add(order)
             s.flush()
@@ -865,13 +1162,26 @@ class TradingEngine:
         self._last_snapshot_at = now
         for agent in s.scalars(select(AgentRow)).all():
             summ = self._portfolio_summary(s, agent)
-            s.add(EquitySnapshotRow(agent_id=agent.id, ts=now, equity=Decimal(str(summ["equity"])), cash=agent.cash))
+            s.add(
+                EquitySnapshotRow(
+                    agent_id=agent.id, ts=now, equity=Decimal(str(summ["equity"])), cash=agent.cash
+                )
+            )
 
     # =====================================================================================
     # execution internals
     # =====================================================================================
 
-    def _try_execute(self, s: Session, agent: AgentRow, order: OrderRow, now: datetime, phase: MarketPhase, *, force: bool = False) -> None:
+    def _try_execute(
+        self,
+        s: Session,
+        agent: AgentRow,
+        order: OrderRow,
+        now: datetime,
+        phase: MarketPhase,
+        *,
+        force: bool = False,
+    ) -> None:
         if order.status not in OPEN_STATUSES:
             return
         if phase != MarketPhase.NORMAL and not force:
@@ -891,7 +1201,12 @@ class TradingEngine:
                 return
             order.triggered = True
             order.updated_at = now
-            self._emit(s, EventType.ORDER_TRIGGERED, agent.id, {"order_id": order.id, "ltp": num(quote.ltp), "trigger_price": num(order.trigger_price)})
+            self._emit(
+                s,
+                EventType.ORDER_TRIGGERED,
+                agent.id,
+                {"order_id": order.id, "ltp": num(quote.ltp), "trigger_price": num(order.trigger_price)},
+            )
 
         if otype in (OrderType.MARKET, OrderType.SL_M):
             price = self._market_fill_price(quote, side, tick)
@@ -918,8 +1233,17 @@ class TradingEngine:
                 return
 
         charges = compute_charges(
-            side=side, product=product, exchange=exchange, quantity=qty, price=price, schedule=self.charge_schedule,
-            apply_dp_charge=(product == ProductType.CNC and side == Side.SELL and not self._dp_charged_today(s, agent.id, order.symbol, exchange, now)),
+            side=side,
+            product=product,
+            exchange=exchange,
+            quantity=qty,
+            price=price,
+            schedule=self.charge_schedule,
+            apply_dp_charge=(
+                product == ProductType.CNC
+                and side == Side.SELL
+                and not self._dp_charged_today(s, agent.id, order.symbol, exchange, now)
+            ),
         )
         self._apply_fill(s, agent, order, qty, price, charges, now)
 
@@ -929,7 +1253,9 @@ class TradingEngine:
         p = round_to_tick(raw, tick)
         return max(quote.lower_circuit, min(quote.upper_circuit, p))
 
-    def _apply_fill(self, s: Session, agent: AgentRow, order: OrderRow, qty: int, price: Decimal, charges, now: datetime) -> None:
+    def _apply_fill(
+        self, s: Session, agent: AgentRow, order: OrderRow, qty: int, price: Decimal, charges, now: datetime
+    ) -> None:
         exchange = Exchange(order.exchange)
         side, product = Side(order.side), ProductType(order.product)
         pos = self._get_position(s, agent.id, order.symbol, exchange, product, create=True)
@@ -950,10 +1276,14 @@ class TradingEngine:
                     self._cancel(s, agent, order, "insufficient funds at execution")
                     return
                 agent.cash -= value
-                self._ledger(s, agent, LedgerKind.BUY, -value, order.id, f"BUY {qty} {order.symbol} @ {price}")
+                self._ledger(
+                    s, agent, LedgerKind.BUY, -value, order.id, f"BUY {qty} {order.symbol} @ {price}"
+                )
             else:
                 agent.cash += value
-                self._ledger(s, agent, LedgerKind.SELL, value, order.id, f"SELL {qty} {order.symbol} @ {price}")
+                self._ledger(
+                    s, agent, LedgerKind.SELL, value, order.id, f"SELL {qty} {order.symbol} @ {price}"
+                )
         else:
             new_margin = to_paise(abs(new_qty) * new_avg / self.mis_leverage)
             delta = new_margin - pos.margin_blocked
@@ -963,15 +1293,26 @@ class TradingEngine:
                     return
                 agent.cash -= delta
                 agent.blocked_cash += delta
-                self._ledger(s, agent, LedgerKind.MARGIN_BLOCK, -delta, order.id, f"MIS margin for {order.symbol}")
+                self._ledger(
+                    s, agent, LedgerKind.MARGIN_BLOCK, -delta, order.id, f"MIS margin for {order.symbol}"
+                )
             elif delta < 0:
                 agent.cash += -delta
                 agent.blocked_cash -= -delta
-                self._ledger(s, agent, LedgerKind.MARGIN_RELEASE, -delta, order.id, f"MIS margin released for {order.symbol}")
+                self._ledger(
+                    s,
+                    agent,
+                    LedgerKind.MARGIN_RELEASE,
+                    -delta,
+                    order.id,
+                    f"MIS margin released for {order.symbol}",
+                )
             pos.margin_blocked = new_margin
             if realised:
                 agent.cash += realised
-                self._ledger(s, agent, LedgerKind.REALISED_PNL, realised, order.id, f"realised P&L on {order.symbol}")
+                self._ledger(
+                    s, agent, LedgerKind.REALISED_PNL, realised, order.id, f"realised P&L on {order.symbol}"
+                )
 
         agent.cash -= charges.total
         self._ledger(s, agent, LedgerKind.CHARGES, -charges.total, order.id, "statutory + brokerage charges")
@@ -985,8 +1326,17 @@ class TradingEngine:
         pos.updated_at = now
 
         trade = TradeRow(
-            order_id=order.id, agent_id=agent.id, symbol=order.symbol, exchange=order.exchange, side=order.side,
-            product=order.product, quantity=qty, price=price, charges=charges.total, realised_pnl=realised, executed_at=now,
+            order_id=order.id,
+            agent_id=agent.id,
+            symbol=order.symbol,
+            exchange=order.exchange,
+            side=order.side,
+            product=order.product,
+            quantity=qty,
+            price=price,
+            charges=charges.total,
+            realised_pnl=realised,
+            executed_at=now,
         )
         s.add(trade)
         s.flush()
@@ -994,7 +1344,9 @@ class TradingEngine:
         prev_filled = order.filled_quantity
         prev_avg = order.average_price or ZERO
         order.filled_quantity += qty
-        order.average_price = ((prev_avg * prev_filled + price * qty) / order.filled_quantity).quantize(Decimal("0.0001"))
+        order.average_price = ((prev_avg * prev_filled + price * qty) / order.filled_quantity).quantize(
+            Decimal("0.0001")
+        )
         order.charges += charges.total
         bd = dict(order.charges_breakdown or {})
         for k, v in charges.as_dict().items():
@@ -1012,7 +1364,16 @@ class TradingEngine:
             order.status = OrderStatus.PARTIALLY_FILLED.value
             ev = EventType.ORDER_PARTIALLY_FILLED
         self.market.record_trade(order.symbol, exchange, qty)
-        self._emit(s, ev, agent.id, {"order": order_to_dict(order), "trade": trade_to_dict(trade), "position": position_to_dict(pos, price)})
+        self._emit(
+            s,
+            ev,
+            agent.id,
+            {
+                "order": order_to_dict(order),
+                "trade": trade_to_dict(trade),
+                "position": position_to_dict(pos, price),
+            },
+        )
 
     def _cancel(self, s: Session, agent: AgentRow, order: OrderRow, reason: str) -> None:
         self._release_block(s, agent, order, order.blocked_cash, "released on cancel")
@@ -1021,7 +1382,9 @@ class TradingEngine:
         order.updated_at = self._now()
         self._emit(s, EventType.ORDER_CANCELLED, agent.id, {"order": order_to_dict(order)})
 
-    def _release_block(self, s: Session, agent: AgentRow, order: OrderRow, amount: Decimal, note: str) -> None:
+    def _release_block(
+        self, s: Session, agent: AgentRow, order: OrderRow, amount: Decimal, note: str
+    ) -> None:
         amount = min(amount, order.blocked_cash)
         if amount <= 0:
             return
@@ -1032,7 +1395,9 @@ class TradingEngine:
 
     # ---- risk helpers ---------------------------------------------------------------
 
-    def _reference_price(self, otype: OrderType, side: Side, price: Decimal | None, trig: Decimal | None, quote: Quote) -> Decimal:
+    def _reference_price(
+        self, otype: OrderType, side: Side, price: Decimal | None, trig: Decimal | None, quote: Quote
+    ) -> Decimal:
         if otype == OrderType.LIMIT:
             return price
         if otype == OrderType.SL:
@@ -1042,7 +1407,15 @@ class TradingEngine:
         slip = Decimal(self.settings.market_slippage_bps) / Decimal(10_000)
         return (quote.ask * (1 + slip)) if side == Side.BUY else quote.bid
 
-    def _required_block(self, product: ProductType, side: Side, qty: int, ref_price: Decimal, cur_qty: int, est_charges: Decimal) -> Decimal:
+    def _required_block(
+        self,
+        product: ProductType,
+        side: Side,
+        qty: int,
+        ref_price: Decimal,
+        cur_qty: int,
+        est_charges: Decimal,
+    ) -> Decimal:
         if product == ProductType.CNC:
             return to_paise(ref_price * qty + est_charges) if side == Side.BUY else ZERO
         signed = qty if side == Side.BUY else -qty
@@ -1061,7 +1434,9 @@ class TradingEngine:
                 details={"retry_after_seconds": max(1, int(60 - (now - times[0]).total_seconds()))},
             )
 
-    def _check_daily_loss(self, s: Session, agent: AgentRow, now: datetime, *, commit: bool = True, raise_: bool = True) -> bool:
+    def _check_daily_loss(
+        self, s: Session, agent: AgentRow, now: datetime, *, commit: bool = True, raise_: bool = True
+    ) -> bool:
         """Roll the day-start equity on a new day; halt the agent if today's loss breaches the limit."""
         today = now.date().isoformat()
         summ = self._portfolio_summary(s, agent)
@@ -1069,7 +1444,9 @@ class TradingEngine:
         if agent.day_start_date != today:
             agent.day_start_date = today
             agent.day_start_equity = equity
-            if agent.status == AgentStatus.HALTED.value and (agent.halt_reason or "").startswith("daily loss limit"):
+            if agent.status == AgentStatus.HALTED.value and (agent.halt_reason or "").startswith(
+                "daily loss limit"
+            ):
                 agent.status = AgentStatus.ACTIVE.value
                 agent.halt_reason = None
                 self._emit(s, EventType.AGENT_RESUMED, agent.id, {"reason": "new trading day"})
@@ -1078,7 +1455,12 @@ class TradingEngine:
             return False
         loss = (agent.day_start_equity or equity) - equity
         if loss >= agent.max_daily_loss:
-            self._halt(s, agent, f"daily loss limit breached: lost ₹{to_paise(loss)} today (limit ₹{agent.max_daily_loss})", cancel_orders=True)
+            self._halt(
+                s,
+                agent,
+                f"daily loss limit breached: lost ₹{to_paise(loss)} today (limit ₹{agent.max_daily_loss})",
+                cancel_orders=True,
+            )
             if commit:
                 s.commit()
             if raise_:
@@ -1095,23 +1477,46 @@ class TradingEngine:
     def _get_order(self, s: Session, agent: AgentRow, order_id: str) -> OrderRow:
         order = s.scalar(select(OrderRow).where(OrderRow.id == order_id, OrderRow.agent_id == agent.id))
         if order is None:
-            order = s.scalar(select(OrderRow).where(OrderRow.client_order_id == order_id, OrderRow.agent_id == agent.id))
+            order = s.scalar(
+                select(OrderRow).where(OrderRow.client_order_id == order_id, OrderRow.agent_id == agent.id)
+            )
         if order is None:
             raise NotFound(f"order {order_id} not found for this agent")
         return order
 
     def _open_orders(self, s: Session, agent_id: str) -> list[OrderRow]:
-        return s.scalars(select(OrderRow).where(OrderRow.agent_id == agent_id, OrderRow.status.in_(OPEN_STATUSES))).all()
+        return s.scalars(
+            select(OrderRow).where(OrderRow.agent_id == agent_id, OrderRow.status.in_(OPEN_STATUSES))
+        ).all()
 
-    def _get_position(self, s: Session, agent_id: str, symbol: str, exchange: Exchange, product: ProductType, *, create: bool = False) -> PositionRow | None:
+    def _get_position(
+        self,
+        s: Session,
+        agent_id: str,
+        symbol: str,
+        exchange: Exchange,
+        product: ProductType,
+        *,
+        create: bool = False,
+    ) -> PositionRow | None:
         pos = s.scalar(
             select(PositionRow).where(
-                PositionRow.agent_id == agent_id, PositionRow.symbol == symbol,
-                PositionRow.exchange == exchange.value, PositionRow.product == product.value,
+                PositionRow.agent_id == agent_id,
+                PositionRow.symbol == symbol,
+                PositionRow.exchange == exchange.value,
+                PositionRow.product == product.value,
             )
         )
         if pos is None and create:
-            pos = PositionRow(agent_id=agent_id, symbol=symbol, exchange=exchange.value, product=product.value, quantity=0, average_price=ZERO, updated_at=self._now())
+            pos = PositionRow(
+                agent_id=agent_id,
+                symbol=symbol,
+                exchange=exchange.value,
+                product=product.value,
+                quantity=0,
+                average_price=ZERO,
+                updated_at=self._now(),
+            )
             s.add(pos)
             s.flush()
         return pos
@@ -1119,18 +1524,30 @@ class TradingEngine:
     def _committed_sell_qty(self, s: Session, agent_id: str, symbol: str, exchange: Exchange) -> int:
         rows = s.scalars(
             select(OrderRow).where(
-                OrderRow.agent_id == agent_id, OrderRow.symbol == symbol, OrderRow.exchange == exchange.value,
-                OrderRow.product == ProductType.CNC.value, OrderRow.side == Side.SELL.value, OrderRow.status.in_(OPEN_STATUSES),
+                OrderRow.agent_id == agent_id,
+                OrderRow.symbol == symbol,
+                OrderRow.exchange == exchange.value,
+                OrderRow.product == ProductType.CNC.value,
+                OrderRow.side == Side.SELL.value,
+                OrderRow.status.in_(OPEN_STATUSES),
             )
         ).all()
         return sum(o.remaining for o in rows)
 
-    def _dp_charged_today(self, s: Session, agent_id: str, symbol: str, exchange: Exchange, now: datetime) -> bool:
+    def _dp_charged_today(
+        self, s: Session, agent_id: str, symbol: str, exchange: Exchange, now: datetime
+    ) -> bool:
         start = datetime.combine(now.date(), datetime.min.time(), tzinfo=IST)
         row = s.scalar(
-            select(TradeRow.id).where(
-                TradeRow.agent_id == agent_id, TradeRow.symbol == symbol, TradeRow.exchange == exchange.value,
-                TradeRow.product == ProductType.CNC.value, TradeRow.side == Side.SELL.value, TradeRow.executed_at >= start,
-            ).limit(1)
+            select(TradeRow.id)
+            .where(
+                TradeRow.agent_id == agent_id,
+                TradeRow.symbol == symbol,
+                TradeRow.exchange == exchange.value,
+                TradeRow.product == ProductType.CNC.value,
+                TradeRow.side == Side.SELL.value,
+                TradeRow.executed_at >= start,
+            )
+            .limit(1)
         )
         return row is not None

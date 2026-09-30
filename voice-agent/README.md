@@ -15,8 +15,9 @@ per-call ledger. The design, the price comparisons and the reasoning are in [doc
                                             └─ CostMeter → ledgers/<call>.json
 ```
 
-Headline (3-minute call, list prices as of 2026-09-30): **budget-hosted $0.030/min**, self-hosted STT/TTS $0.013/min,
-fully self-hosted $0.005/min, versus $0.087/min for a speech-to-speech API and $0.089/min for a managed platform.
+Headline (3-minute call, list prices as of 2026-09-30): **recommended quality-value stack $0.027/min ($0.08/call)**
+with Claude Sonnet 5.5, self-hosted STT/TTS $0.013/min, fully self-hosted $0.005/min, versus $0.087/min for a
+speech-to-speech API and $0.089/min for a managed platform.
 
 ## Quickstart
 

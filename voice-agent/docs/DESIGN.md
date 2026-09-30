@@ -10,8 +10,9 @@ Headline numbers from the estimator (3-minute inbound call, 4 user turns per min
 
 | Profile | $/min | $/call | 100k min/month | What it is |
 |---|---|---|---|---|
-| **budget-hosted** (recommended start) | **$0.030** | $0.089 | $2,950 | Telnyx PSTN, Deepgram Nova-3, Claude Haiku 4.5, Deepgram Aura-2, one small VM |
-| budget-hosted with a 4.5k-token knowledge prompt, cached | $0.026 | $0.078 | $2,607 | same, prompt caching engaged |
+| **quality-value** (recommended for production) | **$0.027** | **$0.080** | $2,661 | Telnyx PSTN, Deepgram Nova-3, Claude Sonnet 5.5 (thinking off, cached prompt), Deepgram Aura-2, one small VM |
+| budget-hosted | $0.030 | $0.089 | $2,950 | same with Claude Haiku 4.5; cheaper than Sonnet only once the prompt exceeds Haiku's 4,096-token cache minimum |
+| budget-hosted with a 4.5k-token knowledge prompt, cached | $0.026 | $0.078 | $2,607 | Haiku with prompt caching engaged (Sonnet: $0.093) |
 | floor-hosted | $0.014 | $0.041 | $1,362 | AssemblyAI streaming, Qwen3-14B on DeepInfra, Inworld TTS Mini: cheapest parts, weakest instruction-following |
 | self-hosted | $0.013 | $0.039 | $1,284 | SIP trunk, Parakeet STT + Kokoro TTS on one shared L4, Claude Haiku 4.5 |
 | self-hosted-llm | $0.005 | $0.015 | $495 | above plus Qwen3-8B on a second L4; lowest marginal, highest fixed/ops cost |
@@ -26,7 +27,7 @@ The three decisions that matter most, in order of dollars saved:
 
 1. **Cascade, not speech-to-speech or a platform.** Saves 60-70 % of the bill by itself.
 2. **Only pay for what is needed:** gate STT with VAD, cache TTS audio, answer trivial turns without the LLM, cut TTS on barge-in, keep LLM prompts cached and replies short. Together these cut the cascade's variable cost by 30-50 % (measured in the simulator, section 4).
-3. **Model choice:** Claude Haiku 4.5 handles task-oriented calls at $1/$5 per million tokens; escalate to Sonnet 5.5 per call or per turn only where the task needs it.
+3. **Model choice by cache behaviour, not list price.** Claude Sonnet 5.5 ($2/$10 per MTok) caches prompts from 512 tokens; Haiku 4.5 ($1/$5) only from 4,096. With a typical 1-3k-token persona prompt Sonnet's cached turns are *cheaper* than Haiku's uncached ones ($0.017 vs $0.025 per call) and resolve harder calls. Haiku wins only when the prompt carries a 4k+-token knowledge base ($0.015 vs $0.030).
 
 Everything else (self-hosting STT/TTS, self-hosting the LLM, negotiating telephony) is a volume game: worth it above roughly 200k-500k minutes per month, not before.
 
@@ -201,7 +202,7 @@ The simulator's `response_latency_avg_s` counter measures endpoint-to-first-audi
 
 ## 6. Tiers and the recommended path
 
-1. **Pilot (weeks 1-4): budget-hosted.** Telnyx (or Twilio if already in use), Deepgram Nova-3 + Aura-2, Claude Haiku 4.5, one small VM. ~$0.03/min. All levers on from day one; put the knowledge base in the system prompt so caching engages.
+1. **Pilot and production (weeks 1-4): quality-value.** Telnyx (or Twilio if already in use), Deepgram Nova-3 + Aura-2, Claude Sonnet 5.5 with thinking off and the prompt cached, one small VM. ~$0.027/min, $0.08 per 3-minute call. All levers on from day one. Switch the LLM to Haiku 4.5 only for flows whose system prompt carries a 4k+-token knowledge base (then Haiku's cache engages and it is ~15 % cheaper); keep Sonnet where task success matters, because an unresolved call costs its full price plus a human handoff.
 2. **Scale (months 2-6): tune, don't rebuild.** Watch three ledger ratios: STT-seconds-billed / call-seconds (target < 0.5), cache-read tokens / input tokens (target > 0.7), TTS cache hit rate (target > 0.2). Add Silero or Smart Turn to cut endpoint latency; add model routing to Sonnet 5.5 where task success needs it; negotiate volume pricing (Deepgram Growth, Telnyx, ElevenLabs) which typically takes 10-30 % off.
 3. **Volume (> ~200k min/month): self-host STT and TTS**, keep the LLM hosted. ~$0.013/min. Requires a GPU fleet with headroom for peak and an on-call rotation.
 4. **Very high volume or data residency: self-host the LLM too.** ~$0.005/min marginal. Only when a measured eval shows an open-weight model meets the task success bar.

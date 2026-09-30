@@ -45,6 +45,17 @@ PROFILES: dict[str, Profile] = {
         tts="selfhost/kokoro",
         compute=(("runpod/l4", 20), ("runpod/l4", 40)),
     ),
+    "quality-value": Profile(
+        name="quality-value",
+        description="Recommended production stack: Telnyx PSTN, Deepgram Nova-3, Claude Sonnet 5.5 (thinking off, cached prompt), "
+        "Deepgram Aura-2. Sonnet 5.5 caches from 512 tokens, so with a normal prompt it costs no more than Haiku 4.5 "
+        "and resolves harder calls.",
+        telephony="telnyx/voice",
+        stt="deepgram/nova-3",
+        llm="claude-sonnet-5-5",
+        tts="deepgram/aura-2",
+        compute=(("hetzner/ccx23", 40),),
+    ),
     "balanced-hosted": Profile(
         name="balanced-hosted",
         description="Same cascade with a stronger LLM (Claude Sonnet 5.5) and Cartesia Sonic TTS; Twilio PSTN.",

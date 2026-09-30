@@ -1,0 +1,534 @@
+{
+  "as_of": "2026-09-30",
+  "currency": "USD",
+  "note": "List (pay-as-you-go) prices for US traffic. 'verification' per SKU: 'fetched' = read from the cited page on the as_of date; 'snippet' = number appeared in a search-result snippet citing that page (the page itself could not be opened from the research sandbox); 'unverified' = conflicting or third-party-only figures. Re-check snippet/unverified rows against the vendor page before committing to a budget. Volume and enterprise tiers are lower everywhere.",
+  "assumptions": {
+    "chars_per_spoken_minute": 850,
+    "audio_tokens_per_min_openai_in": 600,
+    "audio_tokens_per_min_openai_out": 1200,
+    "audio_tokens_per_min_google": 1500
+  },
+  "telephony": {
+    "twilio/voice": {
+      "inbound_per_min": 0.0085,
+      "outbound_per_min": 0.014,
+      "stream_per_min": 0.0044,
+      "number_per_month": 1.15,
+      "increment_s": 60,
+      "verification": "snippet",
+      "note": "Programmable Voice local inbound/outbound; Media Streams (WebSocket audio) is billed on top at stream_per_min. Whole-minute billing.",
+      "source": "https://www.twilio.com/en-us/voice/pricing/us"
+    },
+    "telnyx/voice": {
+      "inbound_per_min": 0.0052,
+      "outbound_per_min": 0.007,
+      "stream_per_min": 0.0035,
+      "number_per_month": 1.0,
+      "increment_s": 60,
+      "verification": "snippet",
+      "note": "Call Control API $0.002/min plus SIP trunk minutes ($0.0032 in, $0.005 out); media streaming (WebSocket) $0.0035/min on top. 60/60 billing.",
+      "source": "https://telnyx.com/pricing/voice-api"
+    },
+    "plivo/voice": {
+      "inbound_per_min": 0.0055,
+      "outbound_per_min": 0.0115,
+      "number_per_month": 0.5,
+      "increment_s": 6,
+      "verification": "snippet",
+      "note": "Local US; 6-second increments. Audio streaming surcharge not found.",
+      "source": "https://www.plivo.com/voice/pricing/us/"
+    },
+    "signalwire/voice": {
+      "inbound_per_min": 0.0066,
+      "outbound_per_min": 0.008,
+      "number_per_month": 0.5,
+      "increment_s": 60,
+      "verification": "unverified",
+      "note": "PSTN local; SIP/WebRTC legs $0.0030/min.",
+      "source": "https://signalwire.com/pricing"
+    },
+    "twilio/sip-trunk": {
+      "inbound_per_min": 0.0034,
+      "outbound_per_min": 0.005,
+      "increment_s": 60,
+      "verification": "unverified",
+      "note": "Elastic SIP Trunking origination (local) / termination; snippets conflict on termination ($0.005-$0.013). For a self-run SIP media stack.",
+      "source": "https://www.twilio.com/en-us/sip-trunking/pricing/us"
+    },
+    "telnyx/sip-trunk": {
+      "inbound_per_min": 0.0032,
+      "outbound_per_min": 0.005,
+      "number_per_month": 1.0,
+      "increment_s": 60,
+      "verification": "snippet",
+      "note": "Elastic SIP Trunking, no channel fees. For a self-run SIP media stack (LiveKit SIP, Asterisk/FreeSWITCH).",
+      "source": "https://telnyx.com/pricing/elastic-sip"
+    },
+    "livekit/cloud-sip": {
+      "inbound_per_min": 0.004,
+      "stream_per_min": 0.01,
+      "number_per_month": 0.0,
+      "increment_s": 60,
+      "verification": "snippet",
+      "note": "SIP participant minute (Ship plan) plus agent session minute $0.01; LiveKit-provided US number inbound $0.01/min instead of SIP. Plans: Build free (5k WebRTC min, 1k agent min), Ship $50/mo, Scale $500/mo.",
+      "source": "https://livekit.com/pricing"
+    },
+    "livekit/cloud-webrtc": {
+      "inbound_per_min": 0.0005,
+      "stream_per_min": 0.01,
+      "increment_s": 60,
+      "verification": "snippet",
+      "note": "Browser/app callers: WebRTC participant minute plus agent session minute. No PSTN cost.",
+      "source": "https://livekit.com/pricing"
+    },
+    "daily/pipecat-cloud": {
+      "inbound_per_min": 0.018,
+      "stream_per_min": 0.01,
+      "increment_s": 60,
+      "verification": "snippet",
+      "note": "PSTN $0.018/min plus agent-1x active minute $0.01 ($0.0005 reserved); 1:1 WebRTC transport free.",
+      "source": "https://www.daily.co/pricing/pipecat-cloud/"
+    },
+    "webrtc/self-hosted": {
+      "inbound_per_min": 0.0,
+      "verification": "n/a",
+      "note": "Browser/app callers on your own WebRTC/WebSocket server: no per-minute transport charge, only compute and egress.",
+      "source": ""
+    }
+  },
+  "stt": {
+    "deepgram/nova-3": {
+      "stream_per_min": 0.0077,
+      "batch_per_min": 0.0043,
+      "increment_s": 1,
+      "verification": "unverified",
+      "note": "PAYG list streaming; LiteLLM's price table lists $0.0048/min (mono) - the lower figure may be current. Bills audio sent, so VAD gating cuts the bill. <300 ms streaming latency.",
+      "source": "https://deepgram.com/pricing"
+    },
+    "deepgram/flux": {
+      "stream_per_min": 0.0065,
+      "increment_s": 1,
+      "verification": "snippet",
+      "note": "Conversational STT with native end-of-turn detection (~260 ms); replaces a separate endpointer.",
+      "source": "https://developers.deepgram.com/docs/flux/quickstart"
+    },
+    "assemblyai/universal-streaming": {
+      "stream_per_min": 0.0025,
+      "batch_per_min": 0.0025,
+      "bills_session_time": true,
+      "increment_s": 1,
+      "verification": "snippet",
+      "note": "$0.15/hr, but streaming is billed on wall-clock session duration, not audio sent: VAD gating does not reduce it. Unlimited concurrency. ~300 ms P50.",
+      "source": "https://www.assemblyai.com/pricing"
+    },
+    "openai/gpt-4o-mini-transcribe": {
+      "stream_per_min": 0.003,
+      "batch_per_min": 0.003,
+      "increment_s": 1,
+      "verification": "fetched",
+      "note": "$1.25/1M audio-in tokens + $5/1M text-out, OpenAI's own ~$0.003/min estimate (LiteLLM table).",
+      "source": "https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
+    },
+    "openai/gpt-4o-transcribe": {
+      "stream_per_min": 0.006,
+      "batch_per_min": 0.006,
+      "increment_s": 1,
+      "verification": "fetched",
+      "source": "https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
+    },
+    "google/chirp-v2": {
+      "stream_per_min": 0.016,
+      "batch_per_min": 0.003,
+      "increment_s": 1,
+      "verification": "fetched",
+      "note": "Speech-to-Text V2 standard tier, 0-500k min; drops to $0.004/min at volume. Dynamic batch $0.003/min.",
+      "source": "https://cloud.google.com/speech-to-text/pricing"
+    },
+    "azure/speech": {
+      "stream_per_min": 0.0167,
+      "batch_per_min": 0.003,
+      "increment_s": 1,
+      "verification": "unverified",
+      "note": "$1/hr real-time; batch $0.18/hr. 5 free hours/month.",
+      "source": "https://azure.microsoft.com/en-us/pricing/details/cognitive-services/speech-services/"
+    },
+    "speechmatics/standard": {
+      "stream_per_min": 0.004,
+      "batch_per_min": 0.004,
+      "increment_s": 1,
+      "verification": "snippet",
+      "note": "$0.24/hr real-time standard after the July 2026 cut; enhanced $0.43/hr.",
+      "source": "https://www.speechmatics.com/pricing"
+    },
+    "gladia/solaria": {
+      "stream_per_min": 0.0125,
+      "batch_per_min": 0.0102,
+      "increment_s": 1,
+      "verification": "snippet",
+      "note": "$0.75/hr self-serve; 103 ms partial / 270 ms final claimed.",
+      "source": "https://www.gladia.io/pricing"
+    },
+    "elevenlabs/scribe-v2-realtime": {
+      "stream_per_min": 0.0065,
+      "batch_per_min": 0.0037,
+      "increment_s": 60,
+      "verification": "snippet",
+      "note": "$0.39/hr real-time; ~150 ms.",
+      "source": "https://elevenlabs.io/pricing/api"
+    },
+    "selfhost/parakeet": {
+      "stream_per_min": 0.0,
+      "verification": "n/a",
+      "note": "NVIDIA Parakeet (or faster-whisper) on your own GPU: cost is in the compute line, shared across concurrent calls.",
+      "source": ""
+    },
+    "selfhost/faster-whisper": {
+      "stream_per_min": 0.0,
+      "verification": "n/a",
+      "note": "faster-whisper small/base on CPU or GPU: cost is in the compute line.",
+      "source": ""
+    }
+  },
+  "tts": {
+    "deepgram/aura-2": {
+      "per_1m_chars": 30.0,
+      "verification": "snippet",
+      "note": "$0.030/1k chars PAYG (Growth $0.027); <200 ms TTFB. Streams raw PCM/mu-law at 8 kHz so telephony needs no transcoding.",
+      "source": "https://deepgram.com/pricing"
+    },
+    "cartesia/sonic": {
+      "per_1m_chars": 37.4,
+      "verification": "snippet",
+      "note": "No PAYG rate: Scale plan $299/8M credits (1 credit/char); Pro plan is $50/1M. ~40-90 ms model latency claimed, ~170-190 ms measured with network.",
+      "source": "https://cartesia.ai/pricing"
+    },
+    "elevenlabs/flash-v2.5": {
+      "per_1m_chars": 50.0,
+      "verification": "snippet",
+      "note": "PAYG API $0.05/1k chars; Multilingual v2/v3 $0.10/1k. ~75 ms model latency.",
+      "source": "https://elevenlabs.io/pricing/api"
+    },
+    "elevenlabs/v3": {
+      "per_1m_chars": 100.0,
+      "verification": "snippet",
+      "source": "https://elevenlabs.io/pricing/api"
+    },
+    "openai/gpt-4o-mini-tts": {
+      "per_1m_chars": 17.6,
+      "verification": "fetched",
+      "note": "Priced per token ($0.60/1M text-in, $12/1M audio-out), OpenAI's own ~$0.015/min; converted at 850 chars/min. 300-500 ms TTFB reported.",
+      "source": "https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
+    },
+    "openai/tts-1": {
+      "per_1m_chars": 15.0,
+      "verification": "fetched",
+      "source": "https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
+    },
+    "rime/mist-v2": {
+      "per_1m_chars": 30.0,
+      "verification": "snippet",
+      "note": "Arcana $40/1M starter ($30 growth); Mist v3 P50 TTFA 96 ms.",
+      "source": "https://rime.ai/pricing"
+    },
+    "inworld/tts-1.5-mini": {
+      "per_1m_chars": 5.0,
+      "verification": "snippet",
+      "note": "Cheapest hosted neural TTS found; P90 TTFA <130 ms claimed. TTS-1.5 Max is $10/1M.",
+      "source": "https://inworld.ai/tts"
+    },
+    "inworld/tts-1.5-max": {
+      "per_1m_chars": 10.0,
+      "verification": "snippet",
+      "source": "https://inworld.ai/tts"
+    },
+    "google/chirp-3-hd": {
+      "per_1m_chars": 30.0,
+      "verification": "fetched",
+      "note": "1M free chars/month; streaming ~200 ms vs ~800 ms non-streaming.",
+      "source": "https://cloud.google.com/text-to-speech/pricing"
+    },
+    "google/neural2": {
+      "per_1m_chars": 16.0,
+      "verification": "fetched",
+      "source": "https://cloud.google.com/text-to-speech/pricing"
+    },
+    "google/standard": {
+      "per_1m_chars": 4.0,
+      "verification": "fetched",
+      "note": "Non-neural; robotic but 4M free chars/month.",
+      "source": "https://cloud.google.com/text-to-speech/pricing"
+    },
+    "azure/neural": {
+      "per_1m_chars": 16.0,
+      "verification": "unverified",
+      "note": "Snippets say $16/1M neural, $22/1M HD (Mar 2026 cut); LiteLLM lists $15/$30. 500k free chars/month.",
+      "source": "https://azure.microsoft.com/en-us/pricing/details/cognitive-services/speech-services/"
+    },
+    "amazon/polly-neural": {
+      "per_1m_chars": 16.0,
+      "verification": "fetched",
+      "note": "Generative $30/1M; standard $4/1M.",
+      "source": "https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
+    },
+    "hume/octave-2": {
+      "per_1m_chars": 50.0,
+      "verification": "snippet",
+      "note": "Business plan overage $0.05/1k; smaller plans up to $0.15/1k.",
+      "source": "https://www.hume.ai/pricing"
+    },
+    "selfhost/kokoro": {
+      "per_1m_chars": 0.0,
+      "verification": "n/a",
+      "note": "Kokoro-82M (Apache-2.0) on CPU or a shared GPU: cost is in the compute line.",
+      "source": "https://huggingface.co/hexgrad/Kokoro-82M"
+    },
+    "selfhost/piper": {
+      "per_1m_chars": 0.0,
+      "verification": "n/a",
+      "note": "Piper on CPU: cost is in the compute line.",
+      "source": "https://github.com/OHF-Voice/piper1-gpl"
+    }
+  },
+  "llm": {
+    "claude-haiku-4-5": {
+      "input_per_mtok": 1.0,
+      "output_per_mtok": 5.0,
+      "cache_write_per_mtok": 1.25,
+      "cache_read_per_mtok": 0.1,
+      "cache_min_tokens": 4096,
+      "verification": "fetched",
+      "note": "Fastest/cheapest Claude; 200K context. Prompt caching needs a >=4096-token prefix (put the FAQ/knowledge in the system prompt to cross it).",
+      "source": "https://docs.claude.com/en/docs/about-claude/pricing"
+    },
+    "claude-sonnet-5-5": {
+      "input_per_mtok": 2.0,
+      "output_per_mtok": 10.0,
+      "cache_write_per_mtok": 2.5,
+      "cache_read_per_mtok": 0.2,
+      "cache_min_tokens": 512,
+      "verification": "fetched",
+      "note": "Current Sonnet; thinking off via {type: between_tools}; 512-token cache minimum.",
+      "source": "https://docs.claude.com/en/docs/about-claude/pricing"
+    },
+    "claude-opus-5-5": {
+      "input_per_mtok": 4.0,
+      "output_per_mtok": 20.0,
+      "cache_write_per_mtok": 5.0,
+      "cache_read_per_mtok": 0.2,
+      "cache_min_tokens": 512,
+      "verification": "fetched",
+      "note": "Thinking cannot be disabled; use effort=low for voice.",
+      "source": "https://docs.claude.com/en/docs/about-claude/pricing"
+    },
+    "deepinfra/llama-3.1-8b": {
+      "input_per_mtok": 0.02,
+      "output_per_mtok": 0.04,
+      "cache_write_per_mtok": 0.02,
+      "cache_read_per_mtok": 0.02,
+      "cache_min_tokens": 0,
+      "verification": "fetched",
+      "note": "Llama 3.1 8B Turbo on DeepInfra (LiteLLM table). No prompt-cache discount modelled. Quality well below Claude Haiku 4.5 for instruction following.",
+      "source": "https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
+    },
+    "deepinfra/qwen3-14b": {
+      "input_per_mtok": 0.12,
+      "output_per_mtok": 0.24,
+      "cache_write_per_mtok": 0.12,
+      "cache_read_per_mtok": 0.12,
+      "cache_min_tokens": 0,
+      "verification": "fetched",
+      "note": "Qwen3-14B (Apache-2.0) hosted; Qwen3-32B is $0.08/$0.28. No prompt-cache discount modelled.",
+      "source": "https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
+    },
+    "groq/llama-3.1-8b": {
+      "input_per_mtok": 0.05,
+      "output_per_mtok": 0.08,
+      "cache_write_per_mtok": 0.05,
+      "cache_read_per_mtok": 0.05,
+      "cache_min_tokens": 0,
+      "verification": "snippet",
+      "note": "Very low time-to-first-token on Groq hardware.",
+      "source": "https://groq.com/pricing"
+    },
+    "selfhost/qwen3-8b": {
+      "input_per_mtok": 0.0,
+      "output_per_mtok": 0.0,
+      "cache_write_per_mtok": 0.0,
+      "cache_read_per_mtok": 0.0,
+      "cache_min_tokens": 0,
+      "verification": "n/a",
+      "note": "Qwen3-8B Instruct on vLLM/SGLang needs its own 24 GB GPU (~0.5 s TTFT p50 at 64 concurrent on an A10): cost is in the compute line.",
+      "source": "https://github.com/QwenLM/Qwen3"
+    }
+  },
+  "s2s": {
+    "openai/gpt-realtime": {
+      "audio_in_per_min": 0.0192,
+      "audio_out_per_min": 0.0768,
+      "text_in_per_mtok": 4.0,
+      "verification": "fetched",
+      "note": "$32/1M audio-in, $64/1M audio-out, $0.40/1M cached audio-in; converted at ~600 in-tokens and ~1200 out-tokens per minute. All inbound audio is billed (silence included) unless you gate it client-side; context re-billing pushes measured costs to $0.06-0.11/min.",
+      "source": "https://openai.com/api/pricing/"
+    },
+    "openai/gpt-realtime-mini": {
+      "audio_in_per_min": 0.006,
+      "audio_out_per_min": 0.024,
+      "text_in_per_mtok": 0.6,
+      "verification": "fetched",
+      "note": "$10/1M in, $20/1M out; production reports of $0.06-0.15/min once context growth is included.",
+      "source": "https://platform.openai.com/docs/models/gpt-realtime-mini"
+    },
+    "google/gemini-live": {
+      "audio_in_per_min": 0.0045,
+      "audio_out_per_min": 0.018,
+      "text_in_per_mtok": 0.5,
+      "verification": "fetched",
+      "note": "$3/1M audio-in, $12/1M audio-out at 25 tokens/s (Vertex page). Accumulated context is re-billed every turn.",
+      "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing"
+    },
+    "amazon/nova-2-sonic": {
+      "audio_in_per_min": 0.0045,
+      "audio_out_per_min": 0.018,
+      "text_in_per_mtok": 0.33,
+      "verification": "unverified",
+      "note": "$3/1M speech-in, $12/1M speech-out; tokens/s not published, assumed 25/s like Gemini. Third-party estimate ~$0.015/min.",
+      "source": "https://aws.amazon.com/bedrock/pricing/"
+    }
+  },
+  "compute": {
+    "hetzner/cx33": {
+      "per_hour": 0.016,
+      "vcpu": 4,
+      "ram_gb": 8,
+      "verification": "snippet",
+      "note": "Shared vCPU, US $9.99/mo (EU EUR 8.49). Enough for a few dozen orchestrator sessions doing VAD + I/O.",
+      "source": "https://www.hetzner.com/cloud/"
+    },
+    "hetzner/ccx23": {
+      "per_hour": 0.165,
+      "vcpu": 4,
+      "ram_gb": 16,
+      "verification": "snippet",
+      "note": "Dedicated vCPU, US ~$102/mo (EU EUR 85.99).",
+      "source": "https://www.hetzner.com/cloud/"
+    },
+    "aws/c7g.xlarge": {
+      "per_hour": 0.145,
+      "vcpu": 4,
+      "ram_gb": 8,
+      "verification": "snippet",
+      "note": "Graviton, us-east-1 on-demand.",
+      "source": "https://aws.amazon.com/ec2/pricing/on-demand/"
+    },
+    "gcp/e2-standard-4": {
+      "per_hour": 0.134,
+      "spot_per_hour": 0.067,
+      "vcpu": 4,
+      "ram_gb": 16,
+      "verification": "snippet",
+      "source": "https://cloud.google.com/compute/vm-instance-pricing"
+    },
+    "aws/g6.xlarge": {
+      "per_hour": 0.8048,
+      "spot_per_hour": 0.6024,
+      "gpu": "L4 24GB",
+      "vcpu": 4,
+      "verification": "snippet",
+      "note": "us-east-1 on-demand. g4dn.xlarge (T4) is $0.526/h.",
+      "source": "https://aws.amazon.com/ec2/pricing/on-demand/"
+    },
+    "gcp/g2-standard-4": {
+      "per_hour": 0.7068,
+      "spot_per_hour": 0.4171,
+      "gpu": "L4 24GB",
+      "vcpu": 4,
+      "verification": "snippet",
+      "source": "https://cloud.google.com/compute/gpus-pricing"
+    },
+    "runpod/l4": {
+      "per_hour": 0.49,
+      "spot_per_hour": 0.44,
+      "gpu": "L4 24GB",
+      "verification": "snippet",
+      "note": "Secure cloud $0.49/h; Community (pre-emptible) $0.44/h; per-second billing.",
+      "source": "https://www.runpod.io/pricing"
+    },
+    "runpod/rtx4090": {
+      "per_hour": 0.69,
+      "spot_per_hour": 0.34,
+      "gpu": "RTX 4090 24GB",
+      "verification": "snippet",
+      "source": "https://www.runpod.io/pricing"
+    },
+    "vast/rtx4090": {
+      "per_hour": 0.3,
+      "spot_per_hour": 0.12,
+      "gpu": "RTX 4090 24GB",
+      "verification": "unverified",
+      "note": "Marketplace, host-set, fluctuates daily.",
+      "source": "https://vast.ai/pricing"
+    },
+    "lambda/a10": {
+      "per_hour": 0.75,
+      "gpu": "A10 24GB",
+      "verification": "unverified",
+      "source": "https://lambda.ai/pricing"
+    },
+    "daily/pipecat-cloud-agent": {
+      "per_hour": 0.6,
+      "verification": "snippet",
+      "note": "agent-1x $0.01 per active agent-minute (1 call per agent) - use compute_concurrency=1.",
+      "source": "https://www.daily.co/pricing/pipecat-cloud/"
+    }
+  },
+  "platform": {
+    "retell": {
+      "per_min": 0.076,
+      "verification": "snippet",
+      "note": "Voice infra $0.055 + TTS $0.015 + a small LLM (~$0.006); ElevenLabs voices $0.040 instead of $0.015; telephony $0.015/min via Retell or BYO SIP. Silence, ringing and hold are billed.",
+      "source": "https://www.retellai.com/pricing"
+    },
+    "vapi": {
+      "per_min": 0.05,
+      "verification": "snippet",
+      "note": "Platform fee only; STT/LLM/TTS/telephony are passed through at provider prices. Silence billed.",
+      "source": "https://vapi.ai/pricing"
+    },
+    "bland": {
+      "per_min": 0.14,
+      "verification": "snippet",
+      "note": "Start plan $0.14/connected min; Build $299/mo at $0.12; Scale $499/mo at $0.11. Includes STT/LLM/TTS/telephony.",
+      "source": "https://www.bland.ai/pricing"
+    },
+    "synthflow": {
+      "per_min": 0.11,
+      "verification": "snippet",
+      "note": "Voice engine $0.09 + LLM $0.02-0.05; managed Twilio +$0.02.",
+      "source": "https://synthflow.ai/pricing"
+    },
+    "elevenlabs/agents": {
+      "per_min": 0.08,
+      "verification": "snippet",
+      "note": "Overage rate; LLM billed separately; you bring telephony.",
+      "source": "https://elevenlabs.io/pricing/agents"
+    },
+    "twilio/conversation-relay": {
+      "per_min": 0.07,
+      "verification": "snippet",
+      "note": "STT+TTS orchestration; voice minutes and your LLM extra.",
+      "source": "https://www.twilio.com/en-us/products/conversational-ai/pricing"
+    },
+    "telnyx/ai-agent": {
+      "per_min": 0.05,
+      "verification": "snippet",
+      "note": "Includes orchestration, STT and TTS; LLM and telephony extra.",
+      "source": "https://telnyx.com/pricing/conversational-ai"
+    },
+    "signalwire/ai-agent": {
+      "per_min": 0.16,
+      "verification": "snippet",
+      "note": "Includes STT+LLM+standard TTS; transport extra.",
+      "source": "https://signalwire.com/c/voice-ai-pricing"
+    }
+  }
+}
